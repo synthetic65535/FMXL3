@@ -155,7 +155,7 @@ begin
 
   FMimeType := 'application/x-www-form-urlencoded';
   FUseGZip  := False;
-  FTimeout  := 4000;
+  FTimeout  := 10000;
 
   Clear;
 end;

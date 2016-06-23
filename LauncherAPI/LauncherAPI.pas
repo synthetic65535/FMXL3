@@ -41,6 +41,7 @@ type
       // Глобальные настройки:
       FBaseFolder        : string; // Рабочая папка на локальном компьютере
       FServerBaseAddress : string; // Адрес рабочей папки на сервере
+      FServerBaseAddressDownload : string; // Адрес рабочей папки на сервере с клиентами 
       FEncryptionKey     : AnsiString; // Ключ шифрования
 
       // Заполняются при авторизации:
@@ -69,6 +70,7 @@ type
     public
       property LocalWorkingFolder: string read FBaseFolder write FBaseFolder;
       property ServerWorkingFolder: string read FServerBaseAddress write FServerBaseAddress;
+      property ServerWorkingFolderDownload: string read FServerBaseAddressDownload write FServerBaseAddressDownload;
       property EncryptionKey: AnsiString read FEncryptionKey write FEncryptionKey;
 
       property IsAuthorized: Boolean read FIsAuthorized;
@@ -80,7 +82,7 @@ type
 
       property SkinSystem   : TSkinSystemWrapper read FSkinSystem;
 
-      constructor Create(const LocalBaseFolder, ServerBaseFolder: string);
+      constructor Create(const LocalBaseFolder, ServerBaseFolder, ServerBaseFolderdownload: string);
       destructor Destroy; override;
 
       // Авторизация, работа с файлами, запуск клиента:
@@ -116,12 +118,13 @@ implementation
 
 { TLauncherAPI }
 
-constructor TLauncherAPI.Create(const LocalBaseFolder, ServerBaseFolder: string);
+constructor TLauncherAPI.Create(const LocalBaseFolder, ServerBaseFolder, ServerBaseFolderDownload: string);
 begin
   FEncryptionKey := '';
 
   FBaseFolder        := LocalBaseFolder;
   FServerBaseAddress := ServerBaseFolder;
+  FServerBaseAddressDownload := ServerBaseFolderDownload;
 
   FIsAuthorized := False;
 
@@ -323,7 +326,7 @@ begin
   DownloadEvents.Java   := CreateEvent(nil, True, True, nil);
 
   // Скачиваем список файлов выбранного клиента:
-  ClientLink := FixSlashes(FServerBaseAddress + '/' + FClients.ClientsArray[ClientNumber].ServerInfo.ClientFolder + '.json', True);
+  ClientLink := FixSlashes(FServerBaseAddressDownload + '/' + FClients.ClientsArray[ClientNumber].ServerInfo.ClientFolder + '.json', True);
   ResetEvent(DownloadEvents.Client);
   TThread.CreateAnonymousThread(procedure()
   begin
@@ -335,7 +338,7 @@ begin
   // Если надо - скачиваем список файлов джавы:
   if not FJavaInfo.ExternalJava then
   begin
-    JavaLink := FixSlashes(FServerBaseAddress + '/' + FJavaInfo.JavaParameters.JavaFolder + '.json', True);
+    JavaLink := FixSlashes(FServerBaseAddressDownload + '/' + FJavaInfo.JavaParameters.JavaFolder + '.json', True);
     ResetEvent(DownloadEvents.Java);
     TThread.CreateAnonymousThread(procedure()
     begin
@@ -343,8 +346,44 @@ begin
       SetEvent(DownloadEvents.Java);
     end).Start;
   end;
+  
 
   WaitForMultipleObjects(2, @DownloadEvents, TRUE, INFINITE);
+  
+  // Возможно скачивание со второго сайта не удалось, пробуем скачать с первого
+  
+  // Client
+  if ClientQueryStatus <> QUERY_STATUS_SUCCESS then
+  begin
+    // Скачиваем список файлов выбранного клиента:
+    ClientLink := FixSlashes(FServerBaseAddress + '/' + FClients.ClientsArray[ClientNumber].ServerInfo.ClientFolder + '.json', True);
+    ResetEvent(DownloadEvents.Client);
+    TThread.CreateAnonymousThread(procedure()
+    begin
+      ClientQueryStatus := QueryValidFilesJSON(ClientLink, FClients.ClientsArray[ClientNumber].FilesValidator);
+      SetEvent(DownloadEvents.Client);
+    end).Start;
+  end;
+  
+  // Java
+  if JavaQueryStatus <> QUERY_STATUS_SUCCESS then
+  begin
+    // Если надо - скачиваем список файлов джавы:
+    if not FJavaInfo.ExternalJava then
+    begin
+      JavaLink := FixSlashes(FServerBaseAddress + '/' + FJavaInfo.JavaParameters.JavaFolder + '.json', True);
+      ResetEvent(DownloadEvents.Java);
+      TThread.CreateAnonymousThread(procedure()
+      begin
+        JavaQueryStatus := QueryValidFilesJSON(JavaLink, FJavaInfo.FilesValidator);
+        SetEvent(DownloadEvents.Java);
+      end).Start;
+  end;
+  end;
+  
+  WaitForMultipleObjects(2, @DownloadEvents, TRUE, INFINITE);
+
+
   CloseHandle(DownloadEvents.Client);
   CloseHandle(DownloadEvents.Java);
 
@@ -352,9 +391,9 @@ begin
   begin
     QueryStatus.StatusCode := ClientQueryStatus;
     case ClientQueryStatus of
-      QUERY_STATUS_DOWNLOAD_ERROR: QueryStatus.StatusString := 'Не удалось загрузить список файлов клиента!' + #13#10 + ClientLink;
+      QUERY_STATUS_DOWNLOAD_ERROR: QueryStatus.StatusString := 'Не удалось загрузить список файлов клиента!' + #13#10 + ClientLink + #13#10 + 'Попробуйте снова через несколько минут.';
       QUERY_STATUS_UNKNOWN_FORMAT: QueryStatus.StatusString := 'Неизвестный формат списка файлов клиента!' + #13#10 + ClientLink;
-      QUERY_STATUS_DECODING_ERROR: QueryStatus.StatusString := 'Не получилось декодировать список файлов клиента! Проверьте ключи шифрования и наличие файла на сервере!' + #13#10 + ClientLink;
+      QUERY_STATUS_DECODING_ERROR: QueryStatus.StatusString := 'Не получилось декодировать список файлов клиента!' + #13#10 + ClientLink + #13#10 + 'Попробуйте снова через несколько минут.'; 
     end;
     Exit;
   end;
@@ -363,9 +402,9 @@ begin
   begin
     QueryStatus.StatusCode := JavaQueryStatus;
     case JavaQueryStatus of
-      QUERY_STATUS_DOWNLOAD_ERROR: QueryStatus.StatusString := 'Не удалось загрузить список файлов Java!' + #13#10 + JavaLink;
+      QUERY_STATUS_DOWNLOAD_ERROR: QueryStatus.StatusString := 'Не удалось загрузить список файлов Java!' + #13#10 + JavaLink + #13#10 + 'Попробуйте снова через несколько минут.';
       QUERY_STATUS_UNKNOWN_FORMAT: QueryStatus.StatusString := 'Неизвестный формат списка файлов Java!' + #13#10 + JavaLink;
-      QUERY_STATUS_DECODING_ERROR: QueryStatus.StatusString := 'Не получилось декодировать список файлов Java! Проверьте ключи шифрования и наличие файла на сервере!' + #13#10 + JavaLink;
+      QUERY_STATUS_DECODING_ERROR: QueryStatus.StatusString := 'Не получилось декодировать список файлов Java!' + #13#10 + JavaLink + #13#10 + 'Попробуйте снова через несколько минут.';
     end;
     Exit;
   end;
@@ -447,7 +486,7 @@ procedure TLauncherAPI.StartDownloader(const DownloadList: TDownloadList;
 begin
   MultiLoader.DownloadList(
                             FBaseFolder,
-                            FServerBaseAddress,
+                            FServerBaseAddressDownload,
                             DownloadList,
                             MultiThreading,
                             procedure(

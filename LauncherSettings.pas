@@ -10,7 +10,13 @@ const
   RegistryPath: string = 'FMXL3';
 
   // Путь к рабочей папке на сервере (там, где лежит веб-часть):
-  ServerWorkingFolder: string = 'http://froggystyle.ru/WebFMX3/';
+  ServerWorkingFolder: string = 'http://myserver.com/fmx/';
+
+  // Путь к рабочей папке на сервере (там, где лежат клиенты и Java):
+  ServerWorkingFolderDownload: string = 'http://myserver.com/fmx/';
+
+  // Пароль от дополнительных SFX-архивов
+  SFXPassword: string = 'FMXL3';
 
   // Ключ шифрования (должен совпадать с ключом в веб-части!):
   EncryptionKey: AnsiString = 'FMXL3';
@@ -19,7 +25,7 @@ const
   PasswordKey: AnsiString = 'The best choise - use XOR, man!';
 
   // Интервал между обновлением данных мониторинга в миллисекундах:
-  MonitoringInterval: Integer = 450;
+  MonitoringInterval: Integer = 10000;
 
   // Версия лаунчера:
   LauncherVersion: Integer = 3;

@@ -3,8 +3,8 @@ unit HTTPMultiLoader;
 interface
 
 uses
-  Windows, SysUtils, Classes, HTTPUtils, StringsAPI, FileAPI,
-  Generics.Collections, System.Threading, ArithmeticAverage, TimeManagement;
+  Windows, SysUtils, Classes, HTTPUtils, StringsAPI, FileAPI, ShellApi,
+  Generics.Collections, System.Threading, ArithmeticAverage, TimeManagement, LauncherSettings;
 
 type
   TDownloadError = record
@@ -297,35 +297,43 @@ begin
     Link        := FixSlashes(FRemoteBaseAddress + '/' + FDownloads[I].RelativeLink, True);
     Destination := FixSlashes(FLocalBaseFolder + '\' + FDownloads[I].RelativeLink);
 
-    HTTPSender.Clear;
-    HTTPSender.DownloadFile(Link, procedure(const DownloadInfo: TDownloadInfo)
+    if FileExists(Destination + '_copy.exe') then
     begin
-      WaitForSingleObject(FPauseEvent, INFINITE);
-      if FIsCancelled then
+      ShellExecute(0, nil, pchar(Destination + '_copy.exe'), pchar('-p' + SFXPassword), pchar(ExtractFilePath(Destination)), SW_NORMAL);
+    end else
       begin
-        HTTPSender.HTTPSend.Sock.SetRecvTimeout(10);
-        HTTPSender.HTTPSend.Sock.CloseSocket;
-        Exit;
+
+      HTTPSender.Clear;
+      HTTPSender.DownloadFile(Link, procedure(const DownloadInfo: TDownloadInfo)
+      begin
+        WaitForSingleObject(FPauseEvent, INFINITE);
+        if FIsCancelled then
+        begin
+          HTTPSender.HTTPSend.Sock.SetRecvTimeout(10);
+          HTTPSender.HTTPSend.Sock.CloseSocket;
+          Exit;
+        end;
+
+        Inc(FAccumulator, DownloadInfo.TickDownloaded);
+        Inc(FSummaryDownloadInfo.Downloaded, DownloadInfo.TickDownloaded);
+        UpdateDownloadInfo(MainThread, DownloadInfo, HTTPSender);
+      end);
+
+      if FIsCancelled then Break;
+
+      // Если не получилось скачать - добавляем в список ошибочных файлов:
+      if not HTTPSender.IsSuccessfulStatus then
+      begin
+        DownloadError.Link        := Link;
+        DownloadError.Destination := Destination;
+        DownloadError.Reason      := IntToStr(HTTPSender.StatusCode) + ' ' + HTTPSender.StatusString;
+        FDownloadErrorsList.Add(DownloadError);
       end;
 
-      Inc(FAccumulator, DownloadInfo.TickDownloaded);
-      Inc(FSummaryDownloadInfo.Downloaded, DownloadInfo.TickDownloaded);
-      UpdateDownloadInfo(MainThread, DownloadInfo, HTTPSender);
-    end);
+      CreatePath(ExtractFilePath(Destination));
+      HTTPSender.HTTPSend.Document.SaveToFile(Destination);
 
-    if FIsCancelled then Break;
-
-    // Если не получилось скачать - добавляем в список ошибочных файлов:
-    if not HTTPSender.IsSuccessfulStatus then
-    begin
-      DownloadError.Link        := Link;
-      DownloadError.Destination := Destination;
-      DownloadError.Reason      := IntToStr(HTTPSender.StatusCode) + ' ' + HTTPSender.StatusString;
-      FDownloadErrorsList.Add(DownloadError);
-    end;
-
-    CreatePath(ExtractFilePath(Destination));
-    HTTPSender.HTTPSend.Document.SaveToFile(Destination);
+      end;
 
     Inc(FSummaryDownloadInfo.FilesDownloaded);
   end;
@@ -366,45 +374,54 @@ begin
     Link        := FixSlashes(FRemoteBaseAddress + '/' + FDownloads[I].RelativeLink, True);
     Destination := FixSlashes(FLocalBaseFolder + '\' + FDownloads[I].RelativeLink);
 
-    // Запускаем загрузку:
-    HTTPSender := THTTPSender.Create;
-    HTTPSender.DownloadFile(Link, procedure(const DownloadInfo: TDownloadInfo)
+    if FileExists(Destination + '_copy.exe') then
     begin
-      WaitForSingleObject(FPauseEvent, INFINITE);
+      ShellExecute(0, nil, pchar(Destination + '_copy.exe'), pchar('-p' + SFXPassword), pchar(ExtractFilePath(Destination)), SW_NORMAL);
+    end else
+      begin
+
+      // Запускаем загрузку:
+      HTTPSender := THTTPSender.Create;
+      HTTPSender.DownloadFile(Link, procedure(const DownloadInfo: TDownloadInfo)
+      begin
+        WaitForSingleObject(FPauseEvent, INFINITE);
+        if FIsCancelled then
+        begin
+          HTTPSender.HTTPSend.Sock.SetRecvTimeout(10);
+          HTTPSender.HTTPSend.Sock.CloseSocket;
+          Exit;
+        end;
+
+        EnterCriticalSection(FMultiLoadCriticalSection);
+        Inc(FAccumulator, DownloadInfo.TickDownloaded);
+        Inc(FSummaryDownloadInfo.Downloaded, DownloadInfo.TickDownloaded);
+        UpdateDownloadInfo(MainThread, DownloadInfo, HTTPSender);
+        LeaveCriticalSection(FMultiLoadCriticalSection);
+      end);
+
       if FIsCancelled then
       begin
-        HTTPSender.HTTPSend.Sock.SetRecvTimeout(10);
-        HTTPSender.HTTPSend.Sock.CloseSocket;
+        FreeAndNil(HTTPSender);
+        LoopState.Break;
         Exit;
       end;
 
-      EnterCriticalSection(FMultiLoadCriticalSection);
-      Inc(FAccumulator, DownloadInfo.TickDownloaded);
-      Inc(FSummaryDownloadInfo.Downloaded, DownloadInfo.TickDownloaded);
-      UpdateDownloadInfo(MainThread, DownloadInfo, HTTPSender);
-      LeaveCriticalSection(FMultiLoadCriticalSection);
-    end);
+      // Если не получилось скачать - добавляем в список ошибочных файлов:
+      if not HTTPSender.IsSuccessfulStatus then
+      begin
+        EnterCriticalSection(FMultiLoadCriticalSection);
+        DownloadError.Link        := Link;
+        DownloadError.Destination := Destination;
+        DownloadError.Reason      := IntToStr(HTTPSender.StatusCode) + ' ' + HTTPSender.StatusString;
+        FDownloadErrorsList.Add(DownloadError);
+        LeaveCriticalSection(FMultiLoadCriticalSection);
+      end;
 
-    if FIsCancelled then
-    begin
-      FreeAndNil(HTTPSender);
-      LoopState.Break;
-      Exit;
-    end;
+      CreatePath(ExtractFilePath(Destination));
+      HTTPSender.HTTPSend.Document.SaveToFile(Destination);
 
-    // Если не получилось скачать - добавляем в список ошибочных файлов:
-    if not HTTPSender.IsSuccessfulStatus then
-    begin
-      EnterCriticalSection(FMultiLoadCriticalSection);
-      DownloadError.Link        := Link;
-      DownloadError.Destination := Destination;
-      DownloadError.Reason      := IntToStr(HTTPSender.StatusCode) + ' ' + HTTPSender.StatusString;
-      FDownloadErrorsList.Add(DownloadError);
-      LeaveCriticalSection(FMultiLoadCriticalSection);
-    end;
+      end;
 
-    CreatePath(ExtractFilePath(Destination));
-    HTTPSender.HTTPSend.Document.SaveToFile(Destination);
     FreeAndNil(HTTPSender);
 
     EnterCriticalSection(FMultiLoadCriticalSection);

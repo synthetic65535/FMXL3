@@ -136,7 +136,8 @@ begin
   else
   begin
     FAuthStatus.StatusCode := AUTH_STATUS_CONNECTION_ERROR;
-    FAuthStatus.StatusString := 'Не удалось подключиться к серверу!';
+    FAuthStatus.StatusString := 'Не удалось подключиться к серверу!' + #13#10 +
+                                'Попробуйте снова через несколько минут.';
   end;
 
   FreeAndNil(Response);

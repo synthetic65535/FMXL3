@@ -320,8 +320,21 @@ begin
   JVMParams := TStringList.Create;
   JVMParams.Clear;
   JVMParams.Text := ReplaceParam(JavaInfo.JavaParameters.Arguments, ' ', #13#10);
-  JVMParams.Add('-Xms' + IntToStr(RAM) + 'm');
+  //JVMParams.Add('-Xms96m');
+  JVMParams.Add('-Xms256m');
+  JVMParams.Add('-Xmn128m');
   JVMParams.Add('-Xmx' + IntToStr(RAM) + 'm');
+
+  // Флаги, которые использует TLauncher для запуска Майнкрафта.
+  //JVMParams.Add('-XX:HeapDumpPath=ThisTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump');
+  //JVMParams.Add('-XX:+UseConcMarkSweepGC');
+  //JVMParams.Add('-XX:-UseAdaptiveSizePolicy');
+  //JVMParams.Add('-XX:-UseGCOverheadLimit');
+  //JVMParams.Add('-XX:+CMSParallelRemarkEnabled');
+  //JVMParams.Add('-XX:+ParallelRefProcEnabled');
+  //JVMParams.Add('-XX:+CMSClassUnloadingEnabled');
+  //JVMParams.Add('-XX:+UseCMSInitiatingOccupancyOnly');
+
   JVMParams.Add(NativesPath);
   JVMParams.Add(ClassPath);
   JVMParams.Add('-Dfml.ignoreInvalidMinecraftCertificates=true');

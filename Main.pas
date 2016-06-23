@@ -6,7 +6,7 @@ interface
 
 uses
   // WinAPI:
-  Windows, Messages, ShellAPI, PsAPI,
+  Windows, Messages, ShellAPI, PsAPI, hwid,
 
   // Delphi RTL:
   System.SysUtils, System.Types, System.UITypes, System.Classes,
@@ -174,6 +174,7 @@ type
     AutoLoginCheckbox: TCheckBox;
     WorkingFolderEdit: TEdit;
     Label6: TLabel;
+    AntiCheatTimer: TTimer;
 
     procedure ShowErrorMessage(const Text: string);
     procedure ShowSuccessMessage(const Text: string);
@@ -231,6 +232,8 @@ type
     procedure FormKeyDown(Sender: TObject; var Key: Word; var KeyChar: Char;
       Shift: TShiftState);
     procedure WorkingFolderEditChangeTracking(Sender: TObject);
+    procedure MainFormLayoutClick(Sender: TObject);
+    procedure AntiCheatTimerTimer(Sender: TObject);
   private type
     TABS = (
       AUTH_TAB,
@@ -255,6 +258,7 @@ type
     FSelectedToPlayClientNumber : Integer;
     FCPUStack, FRAMStack: TStackCapacitor<Single>;
     FLastCPUTimes: TThread.TSystemTimes;
+    LastServer: String;
     function ShowOpenDialog(out SelectedPath: string; const Mask: string = ''): Boolean;
     function ShowSaveDialog(out SelectedPath: string; const Mask: string = ''; const InitialFileName: string = ''): Boolean;
     procedure SwitchTab(DesiredTab: TABS);
@@ -272,6 +276,8 @@ type
     procedure LoadSettings;
     function EncryptPassword(const Password: string): string;
     function DecryptPassword(const PasswordBase64: string): string;
+  public
+    ComplexHwid: String;
   end;
 
 var
@@ -584,6 +590,7 @@ begin
   SaveStringToRegistry(RegistryPath, {$IFDEF CPUX64}'RAM64'{$ELSE}'RAM32'{$ENDIF}, RAMEdit.Text);
   SaveBooleanToRegistry(RegistryPath, 'AutoLogin', AutoLogin);
   SaveStringToRegistry(RegistryPath, 'WorkingFolder', WorkingFolderEdit.Text);
+  SaveStringToRegistry(RegistryPath, 'LastServer', LastServer);
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -620,12 +627,18 @@ begin
   {$ENDIF}
   FIsAutoLogin := ReadBooleanFromRegistry(RegistryPath, 'AutoLogin', False);
   WorkingFolderEdit.Text := ReadStringFromRegistry(RegistryPath, 'WorkingFolder', GetSpecialFolderPath(CSIDL_APPDATA) + '\' + LocalWorkingFolder);
+  LastServer := ReadStringFromRegistry(RegistryPath, 'LastServer', '');
   AutoLoginCheckbox.IsChecked := FIsAutoLogin;
 end;
 
 
 
 
+
+procedure TMainForm.MainFormLayoutClick(Sender: TObject);
+begin
+
+end;
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 //                      Функционал панели заголовка
@@ -744,6 +757,7 @@ end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
+  ComplexHwid := GetComplexHwid();
   // Чистим папку от временных файлов:
   DeleteDirectory('*.old', True);
 
@@ -776,7 +790,7 @@ begin
   Camera.RotationCenter.Z := - Camera.Position.Z;
 }
   // Создаём объект FLauncherAPI:
-  FLauncherAPI := TLauncherAPI.Create(WorkingFolderEdit.Text, ServerWorkingFolder);
+  FLauncherAPI := TLauncherAPI.Create(WorkingFolderEdit.Text, ServerWorkingFolder, ServerWorkingFolderDownload);
   FLauncherAPI.EncryptionKey := EncryptionKey;
   FLauncherAPI.LauncherInfo.LauncherVersion := LauncherVersion;
 
@@ -821,6 +835,11 @@ end;
 
 procedure TMainForm.RegLabelClick(Sender: TObject);
 begin
+//Регистрация на сайте: открываем браузер
+ShellExecute(0, Nil, 'http://myserver.com/' , Nil, Nil, SW_NORMAL);
+
+//Регистрация через лаунчер:
+{
   FIsRegPanel := not FIsRegPanel;
   if FIsRegPanel then
   begin
@@ -832,6 +851,7 @@ begin
     AuthButton.Text := 'Авторизоваться';
     RegLabel.Text   := 'Регистрация';
   end;
+}
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -887,6 +907,7 @@ var
   Client: TMinecraftLauncher;
   PopupBinder: TPopupMenuBinder;
   I: Integer;
+  ClientToSelect: Integer;
 begin
   // Сохраняем настройки:
   FIsAutoLogin := AutoLoginCheckbox.IsChecked;
@@ -899,7 +920,7 @@ begin
     begin
       if not FLauncherAPI.LauncherInfo.UpdateLauncher then
       begin
-        ShowErrorMessage('Не получилось обновить лаунчер!');
+        ShowErrorMessage('Не получилось обновить лаунчер!' + #13#10 + 'Попробуйте снова через несколько минут.');
         ExitProcess(0);
       end;
     end
@@ -939,6 +960,7 @@ begin
   // Создаём список серверов, привязываем события:
   if FLauncherAPI.Clients.Count > 0 then
   begin
+    ClientToSelect := 0;
     SetLength(FServerPanels, FLauncherAPI.Clients.Count);
     for I := 0 to FLauncherAPI.Clients.Count - 1 do
     begin
@@ -995,10 +1017,15 @@ begin
       // Цепляем к серверу всплывающее меню:
       PopupBinder := TPopupMenuBinder.Create(ServersPopupMenu);
       PopupBinder.Bind(ServerPanel.Content.ServerPanel, I);
+
+      // Проверяем, нужно ли его выделить
+      if LastServer = Client.ServerInfo.Name then
+         ClientToSelect := I;
     end;
 
     // Выделяем первый сервер в списке:
-    SelectClient(0);
+    SelectClient(ClientToSelect);
+
   end;
 
   // Скрываем шаблон списка серверов, он нам больше не нужен:
@@ -1088,6 +1115,9 @@ begin
     Exit;
   end;
 
+  // Запоминаем последний запущенный сервер
+  LastServer := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Name;
+
   // Сохраняем настройки:
   SaveSettings(FIsAutoLogin, FLauncherAPI.JavaInfo.ExternalJava);
 
@@ -1139,7 +1169,7 @@ begin
 
       FLauncherAPI.ValidateClient(ClientNumber, True, procedure(ClientNumber: Integer; ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS)
       begin
-        if (ClientValidationStatus <> VALIDATION_STATUS_SUCCESS) or (JavaValidationStatus <> VALIDATION_STATUS_SUCCESS) then
+        if (ClientValidationStatus <> VALIDATION_STATUS_SUCCESS) {$IFDEF DOUBLE_CHECK_JAVA} or (JavaValidationStatus <> VALIDATION_STATUS_SUCCESS) {$ENDIF} then
         begin
           MessageBoxTimeout(0, 'Обнаружено изменение клиента!', 'Внимание!', MB_ICONERROR, 0, 5000);
           ExitProcess(0);
@@ -1215,6 +1245,42 @@ end;
 //                             Запуск игры
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
+var IsLaunched: boolean;
+
+function CheatEngineLaunched(): boolean;
+
+function EnWndCallBack(FormHandle:hWnd; lParam: LPARAM):boolean; stdcall;
+var  FormCaption: array[0..255] of Char;
+CapStr:string;
+begin
+Result:=True;
+GetWindowText(FormHandle,FormCaption,SizeOf(FormCaption));
+CapStr := FormCaption;
+if (pos('Cheat Engine', CapStr) > 0) then
+  IsLaunched := true;
+end;
+
+
+begin
+IsLaunched := false;
+EnumWindows(@EnWndCallBack,0);
+Result := IsLaunched;
+end;
+
+// Глупая защита от глупых читеров
+procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
+var
+  i,j:integer;
+begin
+if (CheatEngineLaunched()) then
+  ExitProcess(0);
+
+for i:=0 to 9 do
+  for j:=0 to 9 do
+      if Windows.FindWindow(nil,pchar('Cheat Engine ' + inttostr(i) + '.' + inttostr(j))) <> 0 then
+        ExitProcess(0);
+end;
+
 procedure TMainForm.AttemptToLaunchClient;
 var
   I: Integer;
@@ -1243,6 +1309,12 @@ begin
   MemoryStatusEx.dwLength := SizeOf(MemoryStatusEx);
   GlobalMemoryStatusEx(MemoryStatusEx);
   CurrentRAM := StrToInt(RAMEdit.Text);
+
+  if CurrentRAM < 512 then
+  begin
+    ShowErrorMessage('Установленного количества оперативной памяти может быть недостаточно для запуска Minecraft. Рекомендуется установить в настройках как минимум 512 мегабайт RAM.');
+  end;
+
   Delta := (Int64(MemoryStatusEx.ullAvailPhys) div 1048576) - CurrentRAM;
   if Delta < 128 then
   begin
@@ -1471,7 +1543,7 @@ begin
         IMAGE_CLOAK : ShowErrorMessage('Плащ ещё не установлен!');
       end;
     SKIN_SYSTEM_NOT_PNG                 : ShowErrorMessage('Файл - не PNG!');
-    SKIN_SYSTEM_CONNECTION_ERROR        : ShowErrorMessage('Не удалось подключиться к серверу!');
+    SKIN_SYSTEM_CONNECTION_ERROR        : ShowErrorMessage('Не удалось подключиться к серверу!' + #13#10 + 'Попробуйте снова через несколько минут.');
     SKIN_SYSTEM_UNKNOWN_ERROR           : ShowErrorMessage(ErrorReason);
     SKIN_SYSTEM_UNKNOWN_RESPONSE_FORMAT : ShowErrorMessage('Неизвестный формат ответа!');
   end;
@@ -1902,8 +1974,17 @@ begin
   Viewport3D.BeginUpdate;
 
   // Получаем коэффициенты масштабирования координат:
-  CoordScaleCoeffX := Bitmap.Width div 64;
-  CoordScaleCoeffY := Bitmap.Height div 32;
+  if Bitmap.Width = Bitmap.Height then
+  begin
+    // Новые скины, с версии Minecraft 1.8
+    CoordScaleCoeffX := Bitmap.Width div 64;
+    CoordScaleCoeffY := Bitmap.Height div 64;
+  end else
+    begin
+      // Старые скины
+      CoordScaleCoeffX := Bitmap.Width div 64;
+      CoordScaleCoeffY := Bitmap.Height div 32;
+    end;
 
   // Составляем массив из групп текстур для каждой части модели:
   DefaultTextures := [@HeadTexture, @TorsoTexture, @LeftArmTexture, @RightArmTexture, @LeftLegTexture, @RightLegTexture, @HelmetTexture];
@@ -2042,8 +2123,17 @@ begin
   Viewport3D.BeginUpdate;
 
   // Получаем коэффициенты масштабирования координат:
-  CoordScaleCoeffX := Bitmap.Width div 64;
-  CoordScaleCoeffY := Bitmap.Height div 32;
+  if Bitmap.Width = Bitmap.Height then
+  begin
+    // Новые скины, с версии Minecraft 1.8
+    CoordScaleCoeffX := Bitmap.Width div 64;
+    CoordScaleCoeffY := Bitmap.Height div 64;
+  end else
+    begin
+      // Старые скины
+      CoordScaleCoeffX := Bitmap.Width div 64;
+      CoordScaleCoeffY := Bitmap.Height div 32;
+    end;
 
   // Создаём массив отмасштабированных координат:
   SetLength(ObjectTexture, Length(CloakTexture));
