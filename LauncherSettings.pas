@@ -16,7 +16,7 @@ const
   ServerWorkingFolderDownload: string = 'http://myserver.com/fmx/';
 
   // Пароль от дополнительных SFX-архивов
-  SFXPassword: string = 'vnbdsh4395hgbcskj2';
+  SFXPassword: string = 'FMXL3';
 
   // Ключ шифрования (должен совпадать с ключом в веб-части!):
   EncryptionKey: AnsiString = 'FMXL3';

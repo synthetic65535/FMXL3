@@ -1245,40 +1245,124 @@ end;
 //                             Запуск игры
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
-var IsLaunched: boolean;
-
 function CheatEngineLaunched(): boolean;
 
-function EnWndCallBack(FormHandle:hWnd; lParam: LPARAM):boolean; stdcall;
-var  FormCaption: array[0..255] of Char;
-CapStr:string;
-begin
-Result:=True;
-GetWindowText(FormHandle,FormCaption,SizeOf(FormCaption));
-CapStr := FormCaption;
-if (pos('Cheat Engine', CapStr) > 0) then
-  IsLaunched := true;
-end;
+const
+  SearchMask: array[0..11] of char = 'Cheat Engine';
+  MinMatches: Integer = 50;
+  MaxProcessesBufferSize: Cardinal = 1024 * 16;
+  MaxDataBufferSize: Cardinal = 1024 * 1024;
+  MaxProcessCheckBytes: Cardinal = 1024 * 1024 * 20;
 
-
-begin
-IsLaunched := false;
-EnumWindows(@EnWndCallBack,0);
-Result := IsLaunched;
-end;
-
-// Глупая защита от глупых читеров
-procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
 var
-  i,j:integer;
+  j, BytesRead, InProcessAddr, CheckedBytes, NeededDataBufferSize, CurDataBufferSize, InPageAddr, LastPageAddr: NativeUInt;
+  i, cntProcesses, SearchIndex, MaskLength, CurMatches: Integer;
+  MyProcessID, ReturnedProcessesBufferSize: DWORD;
+  PidProcesses, PidWork: PDWORD;
+  Mbi: TMemoryBasicInformation;
+  ProcessHandle: THandle;
+  Buf: PChar;
+
+
+begin
+MaskLength := length(SearchMask);
+MyProcessID := GetCurrentProcessId;
+result := false;
+ReturnedProcessesBufferSize := 0;
+GetMem(PidProcesses, MaxProcessesBufferSize);
+GetMem(Buf, MaxDataBufferSize);
+if Assigned(PidProcesses) then
+  begin
+  try
+  if EnumProcesses(PidProcesses, MaxProcessesBufferSize, ReturnedProcessesBufferSize) then
+    begin
+    cntProcesses := ReturnedProcessesBufferSize div sizeof(DWORD);
+    PidWork := PidProcesses;
+    for i := 0 to cntProcesses - 1 do
+      begin
+      if (MyProcessID <> PidWork^) then
+        begin
+        ProcessHandle := OpenProcess(PROCESS_QUERY_INFORMATION or PROCESS_VM_READ, false, PidWork^);
+        if ProcessHandle <> 0 then
+          try
+          CheckedBytes := 0;
+          SearchIndex := 0;
+          CurMatches := 0;
+          InProcessAddr := 0;
+          while (VirtualQueryEx(ProcessHandle, Pointer(InProcessAddr), Mbi, SizeOf(Mbi)) <> 0) do
+            begin
+            application.ProcessMessages;
+            if (Mbi.State = MEM_COMMIT) and not ((Mbi.Protect and PAGE_GUARD) = PAGE_GUARD) then
+              begin
+              try
+                InPageAddr := NativeUInt(Mbi.BaseAddress);
+                LastPageAddr := InPageAddr + Mbi.RegionSize;
+                while (CheckedBytes < MaxProcessCheckBytes) and (InPageAddr < LastPageAddr) do
+                  begin
+                  NeededDataBufferSize := Mbi.RegionSize - NativeUInt(InPageAddr) + NativeUInt(Mbi.BaseAddress);
+                  if (NeededDataBufferSize > MaxDataBufferSize) then
+                    CurDataBufferSize := MaxDataBufferSize else
+                    CurDataBufferSize := NeededDataBufferSize;
+                    if ReadProcessMemory(ProcessHandle, Pointer(InPageAddr), Buf, CurDataBufferSize, BytesRead) then
+                      begin
+                      CheckedBytes := CheckedBytes + BytesRead;
+                      for j := 0 to BytesRead - 1 do
+                        begin
+                        if (Buf[j] = SearchMask[SearchIndex]) then
+                          begin
+                          inc(SearchIndex);
+                          if (SearchIndex >= MaskLength) then
+                            begin
+                            SearchIndex := 0;
+                            inc(CurMatches);
+                            if CurMatches >= MinMatches then
+                              begin
+                              result := true;
+                              exit;
+                              end;
+                            end;
+                          end else
+                            SearchIndex := 0;
+                        end;
+                      end;
+                    InPageAddr := InPageAddr + CurDataBufferSize;
+                    end;
+              except
+              end;
+              end;
+            InProcessAddr := InProcessAddr + Mbi.RegionSize;
+            end;
+          finally
+          CloseHandle(ProcessHandle);
+          end;
+        end;
+      Inc(PidWork);
+      end;
+    end;
+  finally
+  FreeMem(PidProcesses, MaxProcessesBufferSize);
+  FreeMem(Buf);
+  end;
+  end;
+end;
+
+// Защита от Cheat Engine
+procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
 begin
 if (CheatEngineLaunched()) then
+  begin
+  MessageBoxTimeout(0,
+                   PChar(
+                          'Обнаружен Cheat Engine.' + #13#10 +
+                          'Пожалуйста, удалите Cheat Engine с компьютера.'
+                         ),
+                   'Обнаружен чит!',
+                   MB_ICONERROR,
+                   0,
+                   5000
+                  );
   ExitProcess(0);
-
-for i:=0 to 9 do
-  for j:=0 to 9 do
-      if Windows.FindWindow(nil,pchar('Cheat Engine ' + inttostr(i) + '.' + inttostr(j))) <> 0 then
-        ExitProcess(0);
+  end;
 end;
 
 procedure TMainForm.AttemptToLaunchClient;
