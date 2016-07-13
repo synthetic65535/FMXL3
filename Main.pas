@@ -1245,7 +1245,7 @@ end;
 //                             Запуск игры
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
-function CheatEngineLaunched(): boolean;
+function CheatEngineLaunchedMem(): boolean;
 
 const
   SearchMask: array[0..11] of char = 'Cheat Engine';
@@ -1346,10 +1346,52 @@ if Assigned(PidProcesses) then
   end;
 end;
 
-// Защита от Cheat Engine
-procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
+
+
+function CheatEngineLaunchedWin(): boolean;
+
+var IsLaunched: boolean;
+
+function EnWndCallBack(FormHandle:hWnd; lParam: LPARAM):boolean; stdcall;
+var  FormCaption: array[0..255] of Char;
+CapStr:string;
 begin
-if (CheatEngineLaunched()) then
+Result:=True;
+GetWindowText(FormHandle,FormCaption,SizeOf(FormCaption));
+CapStr := FormCaption;
+if (pos('Cheat Engine', CapStr) > 0) then
+  IsLaunched := true;
+end;
+
+
+begin
+IsLaunched := false;
+EnumWindows(@EnWndCallBack,0);
+Result := IsLaunched;
+end;
+
+// Комбинированная защита от читеров
+procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
+var
+	a,b,c:integer;
+	ver: string;
+	CheatEngineLauncherFw: boolean;
+begin
+
+CheatEngineLauncherFw := false;
+for a:=1 to 7 do
+	for b:=-1 to 9 do
+		for c:=-1 to 3 do
+			if not((c=0) or (a < 5) and (c >= 0)) then
+				begin
+				ver := inttostr(a);
+				if (b>=0) then ver := ver + '.' + inttostr(b);
+				if (c>=0) then ver := ver + '.' + inttostr(c);
+				if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
+					CheatEngineLauncherFw := true;
+				end;
+
+if (CheatEngineLauncherFw or CheatEngineLaunchedMem() or CheatEngineLaunchedWin()) then
   begin
   MessageBoxTimeout(0,
                    PChar(
