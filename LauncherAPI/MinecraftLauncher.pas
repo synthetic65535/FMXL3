@@ -323,7 +323,7 @@ begin
   //JVMParams.Add('-Xms96m');
   JVMParams.Add('-Xms256m');
   JVMParams.Add('-Xmx' + IntToStr(RAM) + 'm');
-
+  JVMParams.Add('-XX:+DisableAttachMechanism'); //Отключает возможность подключаться к JVM и инжектить читы. Помогает от некоторых читов.
   JVMParams.Add(NativesPath);
   JVMParams.Add(ClassPath);
   JVMParams.Add('-Dfml.ignoreInvalidMinecraftCertificates=true');
@@ -356,12 +356,9 @@ begin
   if ExperimentalOptimization then
   begin
     JVMParams.Add('-XX:+UnlockDiagnosticVMOptions');
-
     JVMParams.Add('-XX:+UseIncDec');
     JVMParams.Add('-XX:+UseNewLongLShift');
     JVMParams.Add('-XX:+UseFastStosb');
-
-    JVMParams.Add('-XX:+DisableAttachMechanism');
   end;
 
   // Собираем список аргументов клиента:
