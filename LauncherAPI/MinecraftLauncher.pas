@@ -127,12 +127,26 @@ begin
   if GetJSONStringValue(ClientInfo, 'preview', PreviewLink) then
   begin
     TThread.CreateAnonymousThread(procedure()
+    var
+      ResourceStream: TResourceStream;
     begin
     {
       if not DownloadImage(HostBaseFolder + '/' + PreviewLink, FPreviewBitmap) then
         LoadInternalPreview;
     }
-      FHasPreview := DownloadImage(HostBaseFolder + '/' + PreviewLink, FPreviewBitmap);
+      if (FindResource(hInstance, PChar(PreviewLink), RT_RCDATA) <> 0) then
+        begin
+          try
+            ResourceStream := TResourceStream.Create(hInstance, PreviewLink, RT_RCDATA);
+            FPreviewBitmap.LoadFromStream(ResourceStream);
+            FreeAndNil(ResourceStream);
+            FHasPreview := true;
+          except
+            FHasPreview := false;
+          end;
+        end;
+      if (not FHasPreview) then
+        FHasPreview := DownloadImage(HostBaseFolder + '/' + PreviewLink, FPreviewBitmap);
       SetEvent(DownloadEvent);
     end).Start;
   end
@@ -320,8 +334,7 @@ begin
   JVMParams := TStringList.Create;
   JVMParams.Clear;
   JVMParams.Text := ReplaceParam(JavaInfo.JavaParameters.Arguments, ' ', #13#10);
-  //JVMParams.Add('-Xms96m');
-  JVMParams.Add('-Xms256m');
+  JVMParams.Add('-Xms128m');
   JVMParams.Add('-Xmx' + IntToStr(RAM) + 'm');
   JVMParams.Add('-XX:+DisableAttachMechanism'); //Отключает возможность подключаться к JVM и инжектить читы. Помогает от некоторых читов.
   JVMParams.Add(NativesPath);

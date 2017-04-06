@@ -15,6 +15,9 @@ const
   // Путь к рабочей папке на сервере (там, где лежат клиенты и Java):
   ServerWorkingFolderDownload: string = 'http://myserver.com/fmx/';
 
+  // Ссылка для регистрации на сайте. Пустая строка - регистрация через лаунчер.
+  RegisterLink: string = 'http://myserver.com/register.html';
+
   // Пароль от дополнительных SFX-архивов
   SFXPassword: string = 'vnbdsh4395hgbcskj2';
 

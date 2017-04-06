@@ -174,7 +174,6 @@ type
     AutoLoginCheckbox: TCheckBox;
     WorkingFolderEdit: TEdit;
     Label6: TLabel;
-    AntiCheatTimer: TTimer;
 
     procedure ShowErrorMessage(const Text: string);
     procedure ShowSuccessMessage(const Text: string);
@@ -233,7 +232,6 @@ type
       Shift: TShiftState);
     procedure WorkingFolderEditChangeTracking(Sender: TObject);
     procedure MainFormLayoutClick(Sender: TObject);
-    procedure AntiCheatTimerTimer(Sender: TObject);
   private type
     TABS = (
       AUTH_TAB,
@@ -835,23 +833,25 @@ end;
 
 procedure TMainForm.RegLabelClick(Sender: TObject);
 begin
-//Регистрация на сайте: открываем браузер
-ShellExecute(0, Nil, 'http://myserver.com/' , Nil, Nil, SW_NORMAL);
-
-//Регистрация через лаунчер:
-{
-  FIsRegPanel := not FIsRegPanel;
-  if FIsRegPanel then
-  begin
-    AuthButton.Text := 'Зарегистрироваться';
-    RegLabel.Text   := 'Авторизация';
-  end
-  else
-  begin
-    AuthButton.Text := 'Авторизоваться';
-    RegLabel.Text   := 'Регистрация';
-  end;
-}
+  if RegisterLink <> '' then
+    begin
+      //Регистрация на сайте: открываем браузер
+      ShellExecute(0, Nil, PWideChar(RegisterLink), Nil, Nil, SW_NORMAL);
+    end else
+    begin
+      //Регистрация через лаунчер:
+      FIsRegPanel := not FIsRegPanel;
+      if FIsRegPanel then
+      begin
+        AuthButton.Text := 'Зарегистрироваться';
+        RegLabel.Text   := 'Авторизация';
+      end
+      else
+      begin
+        AuthButton.Text := 'Авторизоваться';
+        RegLabel.Text   := 'Регистрация';
+      end;
+    end;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -920,7 +920,7 @@ begin
     begin
       if not FLauncherAPI.LauncherInfo.UpdateLauncher then
       begin
-        ShowErrorMessage('Не получилось обновить лаунчер!' + #13#10 + 'Попробуйте снова через несколько минут.');
+        ShowErrorMessage('Не получилось обновить лаунчер!' + #13#10 + 'Попробуйте снова через несколько минут или скачайте новый лаунчер вручную.');
         ExitProcess(0);
       end;
     end
@@ -1067,183 +1067,6 @@ end;
 //                   Проверка, обновление и запуск клиента
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
-procedure TMainForm.LaunchClient(ClientNumber: Integer);
-var
-  Status: JNI_RETURN_VALUES;
-  JVMPath: string;
-begin
-  PlayButton.Enabled := True;
-
-  // Получаем путь к джаве:
-  if FLauncherAPI.JavaInfo.ExternalJava then
-  begin
-    JVMPath := JVMPathEdit.Text;
-    FLauncherAPI.JavaInfo.SetJVMPath(JVMPath, StrToInt(JavaVersionEdit.Text));
-  end
-  else
-  begin
-    JVMPath := FLauncherAPI.LocalWorkingFolder + '\' +
-               FLauncherAPI.JavaInfo.JavaParameters.JavaFolder + '\' +
-               FLauncherAPI.JavaInfo.JavaParameters.JVMPath;
-  end;
-
-  // Проверяем, что путь верный:
-  if not FileExists(JVMPath) then
-  begin
-    ShowErrorMessage('Библиотека jvm.dll не найдена по расположению:' + #13#10 + JVMPath);
-    Exit;
-  end;
-
-  // Убеждаемся, что указанный файл - библиотека:
-  if GetPEType(JVMPath) <> peDll then
-  begin
-    ShowErrorMessage('Указанный в настройках файл - не DLL!' + #13#10 + 'Укажите корректный путь к jvm.dll!');
-    Exit;
-  end;
-
-  // Убеждаемся, что разрядность библиотеки соответствует разрядности лаунчера:
-  if GetPEMachineType(JVMPath) <> {$IFDEF CPUX64}mt64Bit{$ELSE}mt32Bit{$ENDIF} then
-  begin
-    ShowErrorMessage('Неверная разрядность jvm.dll!' + #13#10 + 'Разрядность библиотеки должна соответствовать разрядности лаунчера!');
-    Exit;
-  end;
-
-  // Убеждаемся, что jvm ещё нет в процессе:
-  if GetModuleHandle('jvm.dll') <> 0 then
-  begin
-    ShowErrorMessage('В процесс загружена неизвестная JVM!' + #13#10 + 'Продолжение невозможно!');
-    Exit;
-  end;
-
-  // Запоминаем последний запущенный сервер
-  LastServer := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Name;
-
-  // Сохраняем настройки:
-  SaveSettings(FIsAutoLogin, FLauncherAPI.JavaInfo.ExternalJava);
-
-  HardwareMonitoring.Enabled := False; // Отключаем системный мониторинг
-  FLauncherAPI.StopMonitoring; // Отключаем мониторинг
-
-  // Скрываем форму лаунчера:
-  ShowWindow(GetFmxWND(MainForm.Handle), SW_HIDE);
-  ShowWindow(ApplicationHWND, SW_HIDE);
-
-  {$IFDEF FLUSH_JVM_FLAGS}
-    SetEnvironmentVariable('_JAVA_OPTIONS', '');
-    SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '');
-  {$ENDIF}
-
-  // Запускаем игру:
-  Status := FLauncherAPI.LaunchClient(
-                                      ClientNumber,
-                                      StrToInt(RAMEdit.Text),
-                                      {$IFDEF USE_JVM_OPTIMIZATION}True{$ELSE}False{$ENDIF},
-                                      {$IFDEF USE_JVM_EXPERIMENTAL_FEATURES}True{$ELSE}False{$ENDIF}
-                                     );
-  case Status of
-    JNIWRAPPER_UNKNOWN_ERROR       : ShowNullErrorMessage('Неизвестная ошибка в JVM!');
-    JNIWRAPPER_JNI_INVALID_VERSION : ShowNullErrorMessage('Неверная версия JNI!');
-    JNIWRAPPER_NOT_ENOUGH_MEMORY   : ShowNullErrorMessage('Недостаточно оперативной памяти для запуска JVM!');
-    JNIWRAPPER_JVM_ALREADY_EXISTS  : ShowNullErrorMessage('JVM уже существует! Нельзя запустить две и более JVM в одном процессе!');
-    JNIWRAPPER_INVALID_ARGUMENTS   : ShowNullErrorMessage('Неверные аргументы JVM!');
-    JNIWRAPPER_CLASS_NOT_FOUND     : ShowNullErrorMessage('Класс не найден!');
-    JNIWRAPPER_METHOD_NOT_FOUND    : ShowNullErrorMessage('Метод не найден!');
-  else
-    {$IFDEF INGAME_FILES_MONITORING}
-      FLauncherAPI.StartInGameChecking(ClientNumber, procedure(const ErrorFiles: TStringList)
-      begin
-        ErrorFiles.SaveToFile('ErrorFiles.txt');
-        MessageBoxTimeout(
-                           0,
-                           PChar(
-                                  'Обнаружено изменение критичных файлов!' + #13#10 +
-                                  'Список файлов сохранён в ErrorFiles.txt'
-                                 ),
-                           'Обнаружено изменение клиента!',
-                           MB_ICONERROR,
-                           0,
-                           5000
-                          );
-        ExitProcess(0);
-      end);
-
-      FLauncherAPI.ValidateClient(ClientNumber, True, procedure(ClientNumber: Integer; ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS)
-      begin
-        if (ClientValidationStatus <> VALIDATION_STATUS_SUCCESS) {$IFDEF DOUBLE_CHECK_JAVA} or (JavaValidationStatus <> VALIDATION_STATUS_SUCCESS) {$ENDIF} then
-        begin
-          MessageBoxTimeout(0, 'Обнаружено изменение клиента!', 'Внимание!', MB_ICONERROR, 0, 5000);
-          ExitProcess(0);
-        end;
-      end);
-    {$ENDIF}
-  end;
-end;
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-procedure TMainForm.ValidateClient(ClientNumber: Integer;
-  PlayAfterValidation: Boolean);
-begin
-  if (ClientNumber < 0) or (FLauncherAPI.Clients.Count = 0) or (ClientNumber > FLauncherAPI.Clients.Count - 1) then
-  begin
-    ShowErrorMessage('Неверный выбранный клиент!');
-    PlayButton.Enabled := True;
-    Exit;
-  end;
-
-  if FLauncherAPI.Clients.ClientsArray[ClientNumber].GetValidationStatus then
-  begin
-    if not PlayAfterValidation then ShowErrorMessage('Клиент уже обновляется! Дождитесь завершения и попробуйте снова!');
-    Exit;
-  end;
-
-  FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Получаем список файлов...';
-  FLauncherAPI.GetValidFilesList(ClientNumber, procedure(ClientNumber: Integer; QueryStatus: QUERY_STATUS)
-  begin
-    if QueryStatus.StatusCode <> QUERY_STATUS_SUCCESS then
-    begin
-      ShowErrorMessage('[Код ошибки ' + IntToStr(Integer(QueryStatus.StatusCode)) + '] ' + QueryStatus.StatusString);
-      FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
-      PlayButton.Enabled := True;
-      Exit;
-    end;
-
-    FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Проверяем файлы...';
-    FLauncherAPI.ValidateClient(ClientNumber, True, procedure(ClientNumber: Integer; ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS)
-    begin
-      if (ClientValidationStatus = VALIDATION_STATUS_SUCCESS) and (JavaValidationStatus = VALIDATION_STATUS_SUCCESS) then
-      begin
-        FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
-        if PlayAfterValidation then LaunchClient(ClientNumber);
-        Exit;
-      end;
-
-      if (ClientValidationStatus = VALIDATION_STATUS_DELETION_ERROR) or (JavaValidationStatus = VALIDATION_STATUS_DELETION_ERROR) then
-      begin
-        ShowErrorMessage(
-                          'Не получилось удалить следующие файлы:' + #13#10 +
-                          FLauncherAPI.Clients.ClientsArray[ClientNumber].FilesValidator.ErrorFiles.Text + #13#10 +
-                          FLauncherAPI.JavaInfo.FilesValidator.ErrorFiles.Text
-                         );
-        FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
-        PlayButton.Enabled := True;
-        Exit;
-      end;
-
-      if (ClientValidationStatus = VALIDATION_STATUS_NEED_UPDATE) or (JavaValidationStatus = VALIDATION_STATUS_NEED_UPDATE) then
-      begin
-        FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Начинаем загрузку...';
-        FServerPanels[ClientNumber].ShowDownloadPanel;
-        FLauncherAPI.UpdateClient(ClientNumber, {$IFDEF SINGLE_THREAD_DOWNLOADING}False{$ELSE}True{$ENDIF}, OnDownload);
-      end;
-    end);
-  end);
-end;
-
-
-//HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-//                             Запуск игры
-//HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
 function CheatEngineLaunchedMem(): boolean;
 
@@ -1371,41 +1194,230 @@ Result := IsLaunched;
 end;
 
 // Комбинированная защита от читеров
-procedure TMainForm.AntiCheatTimerTimer(Sender: TObject);
+procedure AntiCheatThread();
 var
 	a,b,c:integer;
 	ver: string;
 	CheatEngineLauncherFw: boolean;
 begin
+  while (true) do
+    begin
+    CheatEngineLauncherFw := false;
+    for a:=1 to 7 do
+    	for b:=-1 to 9 do
+		    for c:=-1 to 3 do
+    			if not((c=0) or (a < 5) and (c >= 0)) then
+				    begin
+				    ver := inttostr(a);
+				    if (b>=0) then ver := ver + '.' + inttostr(b);
+				    if (c>=0) then ver := ver + '.' + inttostr(c);
+				    if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
+    					CheatEngineLauncherFw := true;
+				    end;
 
-CheatEngineLauncherFw := false;
-for a:=1 to 7 do
-	for b:=-1 to 9 do
-		for c:=-1 to 3 do
-			if not((c=0) or (a < 5) and (c >= 0)) then
-				begin
-				ver := inttostr(a);
-				if (b>=0) then ver := ver + '.' + inttostr(b);
-				if (c>=0) then ver := ver + '.' + inttostr(c);
-				if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
-					CheatEngineLauncherFw := true;
-				end;
+    if (CheatEngineLauncherFw or CheatEngineLaunchedMem() or CheatEngineLaunchedWin()) then
+      begin
+      MessageBoxTimeout(0,
+                       PChar(
+                              'Обнаружен Cheat Engine.' + #13#10 +
+                              'Пожалуйста, удалите Cheat Engine с компьютера.'
+                             ),
+                       'Обнаружен чит!',
+                       MB_ICONERROR,
+                       0,
+                       5000
+                      );
+      ExitProcess(0);
+      end;
 
-if (CheatEngineLauncherFw or CheatEngineLaunchedMem() or CheatEngineLaunchedWin()) then
+    sleep(120000);
+    end;
+
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TMainForm.LaunchClient(ClientNumber: Integer);
+var
+  Status: JNI_RETURN_VALUES;
+  JVMPath: string;
+begin
+  PlayButton.Enabled := True;
+
+  // Получаем путь к джаве:
+  if FLauncherAPI.JavaInfo.ExternalJava then
   begin
-  MessageBoxTimeout(0,
-                   PChar(
-                          'Обнаружен Cheat Engine.' + #13#10 +
-                          'Пожалуйста, удалите Cheat Engine с компьютера.'
-                         ),
-                   'Обнаружен чит!',
-                   MB_ICONERROR,
-                   0,
-                   5000
-                  );
-  ExitProcess(0);
+    JVMPath := JVMPathEdit.Text;
+    FLauncherAPI.JavaInfo.SetJVMPath(JVMPath, StrToInt(JavaVersionEdit.Text));
+  end
+  else
+  begin
+    JVMPath := FLauncherAPI.LocalWorkingFolder + '\' +
+               FLauncherAPI.JavaInfo.JavaParameters.JavaFolder + '\' +
+               FLauncherAPI.JavaInfo.JavaParameters.JVMPath;
+  end;
+
+  // Проверяем, что путь верный:
+  if not FileExists(JVMPath) then
+  begin
+    ShowErrorMessage('Библиотека jvm.dll не найдена по расположению:' + #13#10 + JVMPath);
+    Exit;
+  end;
+
+  // Убеждаемся, что указанный файл - библиотека:
+  if GetPEType(JVMPath) <> peDll then
+  begin
+    ShowErrorMessage('Указанный в настройках файл - не DLL!' + #13#10 + 'Укажите корректный путь к jvm.dll!');
+    Exit;
+  end;
+
+  // Убеждаемся, что разрядность библиотеки соответствует разрядности лаунчера:
+  if GetPEMachineType(JVMPath) <> {$IFDEF CPUX64}mt64Bit{$ELSE}mt32Bit{$ENDIF} then
+  begin
+    ShowErrorMessage('Неверная разрядность jvm.dll!' + #13#10 + 'Разрядность библиотеки должна соответствовать разрядности лаунчера!');
+    Exit;
+  end;
+
+  // Убеждаемся, что jvm ещё нет в процессе:
+  if GetModuleHandle('jvm.dll') <> 0 then
+  begin
+    ShowErrorMessage('В процесс загружена неизвестная JVM!' + #13#10 + 'Продолжение невозможно!');
+    Exit;
+  end;
+
+  // Запоминаем последний запущенный сервер
+  LastServer := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Name;
+
+  // Сохраняем настройки:
+  SaveSettings(FIsAutoLogin, FLauncherAPI.JavaInfo.ExternalJava);
+
+  HardwareMonitoring.Enabled := False; // Отключаем системный мониторинг
+  FLauncherAPI.StopMonitoring; // Отключаем мониторинг
+
+  // Скрываем форму лаунчера:
+  ShowWindow(GetFmxWND(MainForm.Handle), SW_HIDE);
+  ShowWindow(ApplicationHWND, SW_HIDE);
+
+  {$IFDEF FLUSH_JVM_FLAGS}
+    SetEnvironmentVariable('_JAVA_OPTIONS', '');
+    SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '');
+  {$ENDIF}
+
+  // Запускаем поток проверки на наличие читов
+  TThread.CreateAnonymousThread(AntiCheatThread).Start;
+
+  // Запускаем игру:
+  Status := FLauncherAPI.LaunchClient(
+                                      ClientNumber,
+                                      StrToInt(RAMEdit.Text),
+                                      {$IFDEF USE_JVM_OPTIMIZATION}True{$ELSE}False{$ENDIF},
+                                      {$IFDEF USE_JVM_EXPERIMENTAL_FEATURES}True{$ELSE}False{$ENDIF}
+                                     );
+  case Status of
+    JNIWRAPPER_UNKNOWN_ERROR       : ShowNullErrorMessage('Неизвестная ошибка в JVM!');
+    JNIWRAPPER_JNI_INVALID_VERSION : ShowNullErrorMessage('Неверная версия JNI!');
+    JNIWRAPPER_NOT_ENOUGH_MEMORY   : ShowNullErrorMessage('Недостаточно оперативной памяти для запуска JVM!');
+    JNIWRAPPER_JVM_ALREADY_EXISTS  : ShowNullErrorMessage('JVM уже существует! Нельзя запустить две и более JVM в одном процессе!');
+    JNIWRAPPER_INVALID_ARGUMENTS   : ShowNullErrorMessage('Неверные аргументы JVM!');
+    JNIWRAPPER_CLASS_NOT_FOUND     : ShowNullErrorMessage('Класс не найден!');
+    JNIWRAPPER_METHOD_NOT_FOUND    : ShowNullErrorMessage('Метод не найден!');
+  else
+    {$IFDEF INGAME_FILES_MONITORING}
+      FLauncherAPI.StartInGameChecking(ClientNumber, procedure(const ErrorFiles: TStringList)
+      begin
+        ErrorFiles.SaveToFile('ErrorFiles.txt');
+        MessageBoxTimeout(
+                           0,
+                           PChar(
+                                  'Обнаружено изменение критичных файлов!' + #13#10 +
+                                  'Список файлов сохранён в ErrorFiles.txt'
+                                 ),
+                           'Обнаружено изменение клиента!',
+                           MB_ICONERROR,
+                           0,
+                           5000
+                          );
+        ExitProcess(0);
+      end);
+
+      FLauncherAPI.ValidateClient(ClientNumber, True, procedure(ClientNumber: Integer; ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS)
+      begin
+        if (ClientValidationStatus <> VALIDATION_STATUS_SUCCESS) {$IFDEF DOUBLE_CHECK_JAVA} or (JavaValidationStatus <> VALIDATION_STATUS_SUCCESS) {$ENDIF} then
+        begin
+          MessageBoxTimeout(0, 'Обнаружено изменение клиента!', 'Внимание!', MB_ICONERROR, 0, 5000);
+          ExitProcess(0);
+        end;
+      end);
+    {$ENDIF}
   end;
 end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TMainForm.ValidateClient(ClientNumber: Integer;
+  PlayAfterValidation: Boolean);
+begin
+  if (ClientNumber < 0) or (FLauncherAPI.Clients.Count = 0) or (ClientNumber > FLauncherAPI.Clients.Count - 1) then
+  begin
+    ShowErrorMessage('Неверный выбранный клиент!');
+    PlayButton.Enabled := True;
+    Exit;
+  end;
+
+  if FLauncherAPI.Clients.ClientsArray[ClientNumber].GetValidationStatus then
+  begin
+    if not PlayAfterValidation then ShowErrorMessage('Клиент уже обновляется! Дождитесь завершения и попробуйте снова!');
+    Exit;
+  end;
+
+  FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Получаем список файлов...';
+  FLauncherAPI.GetValidFilesList(ClientNumber, procedure(ClientNumber: Integer; QueryStatus: QUERY_STATUS)
+  begin
+    if QueryStatus.StatusCode <> QUERY_STATUS_SUCCESS then
+    begin
+      ShowErrorMessage('[Код ошибки ' + IntToStr(Integer(QueryStatus.StatusCode)) + '] ' + QueryStatus.StatusString);
+      FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
+      PlayButton.Enabled := True;
+      Exit;
+    end;
+
+    FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Проверяем файлы...';
+    FLauncherAPI.ValidateClient(ClientNumber, True, procedure(ClientNumber: Integer; ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS)
+    begin
+      if (ClientValidationStatus = VALIDATION_STATUS_SUCCESS) and (JavaValidationStatus = VALIDATION_STATUS_SUCCESS) then
+      begin
+        FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
+        if PlayAfterValidation then LaunchClient(ClientNumber);
+        Exit;
+      end;
+
+      if (ClientValidationStatus = VALIDATION_STATUS_DELETION_ERROR) or (JavaValidationStatus = VALIDATION_STATUS_DELETION_ERROR) then
+      begin
+        ShowErrorMessage(
+                          'Не получилось удалить следующие файлы:' + #13#10 +
+                          FLauncherAPI.Clients.ClientsArray[ClientNumber].FilesValidator.ErrorFiles.Text + #13#10 +
+                          FLauncherAPI.JavaInfo.FilesValidator.ErrorFiles.Text + #13#10 +
+                          'Возможно лаунчер уже был запущен, попробуйте завершить его через Диспетчер Задач.'
+                         );
+        FServerPanels[ClientNumber].Content.InfoLabel.Text := FLauncherAPI.Clients.ClientsArray[ClientNumber].ServerInfo.Info;
+        PlayButton.Enabled := True;
+        Exit;
+      end;
+
+      if (ClientValidationStatus = VALIDATION_STATUS_NEED_UPDATE) or (JavaValidationStatus = VALIDATION_STATUS_NEED_UPDATE) then
+      begin
+        FServerPanels[ClientNumber].Content.InfoLabel.Text := 'Начинаем загрузку...';
+        FServerPanels[ClientNumber].ShowDownloadPanel;
+        FLauncherAPI.UpdateClient(ClientNumber, {$IFDEF SINGLE_THREAD_DOWNLOADING}False{$ELSE}True{$ENDIF}, OnDownload);
+      end;
+    end);
+  end);
+end;
+
+
+//HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+//                             Запуск игры
+//HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
 procedure TMainForm.AttemptToLaunchClient;
 var
@@ -1444,7 +1456,7 @@ begin
   Delta := (Int64(MemoryStatusEx.ullAvailPhys) div 1048576) - CurrentRAM;
   if Delta < 128 then
   begin
-    ShowErrorMessage('Недостаточно памяти для запуска игры!' + #13#10 + 'Уменьшите количество памяти в настройках!');
+    ShowErrorMessage('Недостаточно памяти для запуска игры!' + #13#10 + 'Совет 1: Попробуйте закрыть Google Chrome, Skype, Acrobat Reader, а так же другие неиспользуемые программы.' + #13#10 + 'Совет 2: Уменьшите количество памяти в настройках.');
     Exit;
   end;
 

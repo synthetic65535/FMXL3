@@ -1,1 +1,6 @@
 DEFAULT_SKIN RCDATA Images\DefaultSkin.png
+PREVIEW_CLASSIC RCDATA Images\Classic.png
+PREVIEW_INDUSTRIAL RCDATA Images\Industrial.png
+PREVIEW_MAGIC RCDATA Images\Magic.png
+PREVIEW_MINIGAMES RCDATA Images\MiniGames.png
+PREVIEW_SKYBLOCK RCDATA Images\SkyBlock.png
