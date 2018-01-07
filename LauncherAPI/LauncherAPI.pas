@@ -209,7 +209,7 @@ var
 begin
   AuthData.Login    := EncryptData(Login);
   AuthData.Password := EncryptData(Password);
-  AuthData.HWID     := EncryptData(GetHWID);
+
   if SendHWID then
     AuthData.HWID   := EncryptData(GetHWID) else
     AuthData.HWID   := '';
