@@ -4,7 +4,7 @@ interface
 
 uses
   System.JSON, SysUtils, Classes, HTTPUtils,
-  HWID, Encryption, JSONUtils, CodepageAPI;
+  Encryption, JSONUtils, CodepageAPI;
 
 type
   TAuthResponse = TJSONObject;
@@ -14,7 +14,7 @@ type
   TAuthData = record
     Login    : string;
     Password : string;
-    SendHWID : Boolean;
+    HWID : string;
   end;
 
   // Статусные коды авторизации:
@@ -85,7 +85,7 @@ begin
 
   // Формируем запрос:
   Request := 'login=' + FAuthData.Login + '&password=' + FAuthData.Password;
-  if FAuthData.SendHWID then Request := Request + '&hwid=' + GetHWID;
+  if FAuthData.HWID <> '' then Request := Request + '&hwid=' + FAuthData.HWID;
 
   // Отправляем запрос на сервер:
   HTTPSender := THTTPSender.Create;
@@ -130,7 +130,8 @@ begin
     begin
       FAuthStatus.StatusCode := AUTH_STATUS_BAD_RESPONSE;
       FAuthStatus.StatusString := 'Не удалось преобразовать ответ от скрипта в JSON!' + #13#10 +
-                                  'Проверьте правильность ключа шифрования!';
+                                  'Игрок, скачай новую версию лаунчера.' + #13#10 +
+                                  'Администратор, проверь правильность ключа шифрования.';
     end;
   end
   else

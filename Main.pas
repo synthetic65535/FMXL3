@@ -29,7 +29,8 @@ uses
   blcksock, ssl_openssl, ssl_openssl_lib,
 
   // AUX Modules:
-  LauncherSettings, PopupManager, ServerPanel, StackCapacitor, ResUnpacker;
+  LauncherSettings, PopupManager, ServerPanel, StackCapacitor, ResUnpacker,
+  System.ImageList, FMX.ImgList;
 
 type
   TMainForm = class(TForm)
@@ -174,6 +175,7 @@ type
     AutoLoginCheckbox: TCheckBox;
     WorkingFolderEdit: TEdit;
     Label6: TLabel;
+    ServersPopupImageList: TImageList;
 
     procedure ShowErrorMessage(const Text: string);
     procedure ShowSuccessMessage(const Text: string);
@@ -208,6 +210,7 @@ type
     procedure SettingsImageClick(Sender: TObject);
     procedure DeauthLabelClick(Sender: TObject);
     procedure AuthButtonClick(Sender: TObject);
+    procedure AddonItemClick(Sender: TObject);
     procedure OpenFolderItemClick(Sender: TObject);
     procedure UpdateClientItemClick(Sender: TObject);
     procedure DeleteClientItemClick(Sender: TObject);
@@ -231,7 +234,6 @@ type
     procedure FormKeyDown(Sender: TObject; var Key: Word; var KeyChar: Char;
       Shift: TShiftState);
     procedure WorkingFolderEditChangeTracking(Sender: TObject);
-    procedure MainFormLayoutClick(Sender: TObject);
   private type
     TABS = (
       AUTH_TAB,
@@ -272,8 +274,10 @@ type
     procedure LaunchClient(ClientNumber: Integer);
     procedure SaveSettings(AutoLogin, ExternalJava: Boolean);
     procedure LoadSettings;
-    function EncryptPassword(const Password: string): string;
-    function DecryptPassword(const PasswordBase64: string): string;
+    function EncryptPassword3(const Password: string): string;
+    function DecryptPassword3(const PasswordBase64: string): string;
+    function DecryptPassword2(const PasswordBase64: string): string;
+    function DecryptPassword1(const PasswordBase64: string): string;
   public
     ComplexHwid: String;
   end;
@@ -288,16 +292,42 @@ implementation
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
-function TMainForm.EncryptPassword(const Password: string): string;
+function TMainForm.EncryptPassword3(const Password: string): string;
 begin
   Result := Password;
-  EncryptDecryptVerrnam(Result, PAnsiChar(PasswordKey), Length(PasswordKey));
+  EncryptDecryptVerrnam(Result, PAnsiChar(ComplexHwid), Length(ComplexHwid));
   Result := TNetEncoding.Base64.Encode(Result);
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-function TMainForm.DecryptPassword(const PasswordBase64: string): string;
+function TMainForm.DecryptPassword2(const PasswordBase64: string): string;
+begin
+  Result := PasswordBase64;
+  try
+    Result := TNetEncoding.Base64.Decode(Result);
+    EncryptDecryptVerrnam(Result, PAnsiChar('COM' + ComplexHwid), Length('COM' + ComplexHwid));
+  except
+    Result := '';
+  end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+function TMainForm.DecryptPassword3(const PasswordBase64: string): string;
+begin
+  Result := PasswordBase64;
+  try
+    Result := TNetEncoding.Base64.Decode(Result);
+    EncryptDecryptVerrnam(Result, PAnsiChar(ComplexHwid), Length(ComplexHwid));
+  except
+    Result := '';
+  end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+function TMainForm.DecryptPassword1(const PasswordBase64: string): string;
 begin
   Result := PasswordBase64;
   try
@@ -571,9 +601,11 @@ begin
   SaveStringToRegistry(RegistryPath, 'Login', LoginEdit.Text);
 
   if AutoLogin then
-    SaveStringToRegistry(RegistryPath, 'Password', EncryptPassword(PasswordEdit.Text))
+    SaveStringToRegistry(RegistryPath, 'Password', EncryptPassword3(PasswordEdit.Text))
   else
     SaveStringToRegistry(RegistryPath, 'Password', '');
+
+  SaveNumberToRegistry(RegistryPath, 'PasswordEncryptionVersion', 3);
 
   if ExternalJava then
   begin
@@ -613,7 +645,12 @@ begin
   JavaVersion := GetJavaLowVersion(JavaVersion);
 
   LoginEdit.Text    := ReadStringFromRegistry(RegistryPath, 'Login'   , LoginEdit.Text);
-  PasswordEdit.Text := DecryptPassword(ReadStringFromRegistry(RegistryPath, 'Password', ''));
+  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 1 then
+    PasswordEdit.Text := DecryptPassword1(ReadStringFromRegistry(RegistryPath, 'Password', ''));
+  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 2 then
+    PasswordEdit.Text := DecryptPassword2(ReadStringFromRegistry(RegistryPath, 'Password', ''));
+  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 3 then
+    PasswordEdit.Text := DecryptPassword3(ReadStringFromRegistry(RegistryPath, 'Password', ''));
   {$IFDEF CPUX64}
     RAMEdit.Text         := ReadStringFromRegistry(RegistryPath, 'RAM64'        , RAMEdit.Text);
     JavaVersionEdit.Text := ReadStringFromRegistry(RegistryPath, 'JavaVersion64', JavaVersion);
@@ -629,14 +666,6 @@ begin
   AutoLoginCheckbox.IsChecked := FIsAutoLogin;
 end;
 
-
-
-
-
-procedure TMainForm.MainFormLayoutClick(Sender: TObject);
-begin
-
-end;
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 //                      Функционал панели заголовка
@@ -746,9 +775,6 @@ begin
   SwitchTab(GAME_TAB);
 end;
 
-
-
-
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
 
@@ -756,6 +782,7 @@ end;
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
   ComplexHwid := GetComplexHwid();
+  
   // Чистим папку от временных файлов:
   DeleteDirectory('*.old', True);
 
@@ -906,8 +933,11 @@ var
   ServerPanel: TServerPanel;
   Client: TMinecraftLauncher;
   PopupBinder: TPopupMenuBinder;
-  I: Integer;
+  I, J: Integer;
   ClientToSelect: Integer;
+  AddonsCount: Integer;
+  TempMenuItem: TMenuItem;
+  ImgSize: TSizeF;
 begin
   // Сохраняем настройки:
   FIsAutoLogin := AutoLoginCheckbox.IsChecked;
@@ -1014,8 +1044,38 @@ begin
         Sender.Content.ServerPanel.Repaint;
       end;
 
-      // Цепляем к серверу всплывающее меню:
+      // Создаём всплывающее меню по образцу
       PopupBinder := TPopupMenuBinder.Create(ServersPopupMenu);
+
+      ImgSize := TSizeF.Create(16, 16);
+      // Добавляем аддоны в меню
+      AddonsCount := Length(Client.ServerInfo.Addons);
+      if AddonsCount > 0 then
+      begin
+        // Добавляем разделитель
+        TempMenuItem := TMenuItem.Create(nil);
+        TempMenuItem.Text := '-';
+        PopupBinder.AddItem(TempMenuItem);
+
+        // Добавляем кнопки для каждого аддона
+        for J := 0 to AddonsCount-1 do
+        begin
+           TempMenuItem := TMenuItem.Create(nil);
+
+           TempMenuItem.Text := Client.ServerInfo.Addons[J].Id;
+           if Client.ServerInfo.Addons[J].Name <> '' then
+             TempMenuItem.Text := Client.ServerInfo.Addons[J].Name;
+           TempMenuItem.TagString := Client.ServerInfo.Addons[J].Id;
+           TempMenuItem.IsChecked := ReadBooleanFromRegistry(RegistryPath, 'addon_' + Client.ServerInfo.Addons[J].Id, Client.ServerInfo.Addons[J].Enabled);
+           if TempMenuItem.IsChecked then
+             TempMenuItem.Bitmap := ServersPopupImageList.Bitmap(ImgSize, 1) else
+             TempMenuItem.Bitmap := ServersPopupImageList.Bitmap(ImgSize, 0);
+           TempMenuItem.OnClick := AddonItemClick;
+
+           PopupBinder.AddItem(TempMenuItem);
+        end;
+      end;
+      // Цепляем к серверу всплывающее меню:
       PopupBinder.Bind(ServerPanel.Content.ServerPanel, I);
 
       // Проверяем, нужно ли его выделить
@@ -1023,7 +1083,7 @@ begin
          ClientToSelect := I;
     end;
 
-    // Выделяем первый сервер в списке:
+    // Выделяем нужный сервер в списке:
     SelectClient(ClientToSelect);
 
   end;
@@ -1196,26 +1256,34 @@ end;
 // Комбинированная защита от читеров
 procedure AntiCheatThread();
 var
-	a,b,c:integer;
-	ver: string;
-	CheatEngineLauncherFw: boolean;
+  a,b,c:integer;
+  ver: string;
+  CELauncherFw: boolean;
+  CELaunchedMem: boolean;
+  CELaunchedWin: boolean;
 begin
   while (true) do
     begin
-    CheatEngineLauncherFw := false;
+    try
+    CELaunchedMem := false;
     for a:=1 to 7 do
-    	for b:=-1 to 9 do
-		    for c:=-1 to 3 do
-    			if not((c=0) or (a < 5) and (c >= 0)) then
-				    begin
-				    ver := inttostr(a);
-				    if (b>=0) then ver := ver + '.' + inttostr(b);
-				    if (c>=0) then ver := ver + '.' + inttostr(c);
-				    if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
-    					CheatEngineLauncherFw := true;
-				    end;
+      for b:=-1 to 9 do
+        for c:=-1 to 3 do
+          if not((c=0) or (a < 5) and (c >= 0)) then
+            begin
+            ver := inttostr(a);
+            if (b>=0) then ver := ver + '.' + inttostr(b);
+            if (c>=0) then ver := ver + '.' + inttostr(c);
+            if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
+              CELaunchedMem := true;
+            end;
 
-    if (CheatEngineLauncherFw or CheatEngineLaunchedMem() or CheatEngineLaunchedWin()) then
+    CELaunchedMem := CheatEngineLaunchedMem();
+    CELaunchedWin := CheatEngineLaunchedWin();
+    except
+    end;
+
+    if (CELauncherFw or CELaunchedMem or CELaunchedWin) then
       begin
       MessageBoxTimeout(0,
                        PChar(
@@ -1229,6 +1297,7 @@ begin
                       );
       ExitProcess(0);
       end;
+
 
     sleep(120000);
     end;
@@ -1456,7 +1525,7 @@ begin
   Delta := (Int64(MemoryStatusEx.ullAvailPhys) div 1048576) - CurrentRAM;
   if Delta < 128 then
   begin
-    ShowErrorMessage('Недостаточно памяти для запуска игры!' + #13#10 + 'Совет 1: Попробуйте закрыть Google Chrome, Skype, Acrobat Reader, а так же другие неиспользуемые программы.' + #13#10 + 'Совет 2: Уменьшите количество памяти в настройках.');
+    ShowErrorMessage('Недостаточно памяти для запуска игры!' + #13#10 + 'Совет 1: Попробуйте закрыть Google Chrome, Skype, Acrobat Reader, а так же другие неиспользуемые программы.' + #13#10 + 'Совет 2: Уменьшите количество памяти в настройках.' + #13#10 + 'Совет 3: Завершите через Диспетчер Задач зависший процесс игры.');
     Exit;
   end;
 
@@ -1590,8 +1659,37 @@ end;
 
 procedure TMainForm.ServersPopupMenuPopup(Sender: TObject);
 begin
-  SelectClient(TControl(Sender).Tag);
-  FIsPopup := True;
+  if PlayButton.Enabled then
+  begin
+    SelectClient(TControl(Sender).Tag);
+    FIsPopup := True;
+  end else
+    begin
+      // Если процесс запуска игры уже начат, то запрещаем всплывать PopupMenu
+      FIsPopup := False;
+      Abort;
+    end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TMainForm.AddonItemClick(Sender: TObject);
+var
+  Client: TMinecraftLauncher;
+  AddonId: string;
+  ImgSize: TSizeF;
+begin
+  Client := FLauncherAPI.Clients.ClientsArray[TControl(Sender).Tag];
+  AddonId := TControl(Sender).TagString;
+  ImgSize := TSizeF.Create(16,16);
+  With (Sender as TMenuItem) do
+  begin
+  IsChecked := not IsChecked;
+  if IsChecked then
+    Bitmap := ServersPopupImageList.Bitmap(ImgSize, 1) else
+    Bitmap := ServersPopupImageList.Bitmap(ImgSize, 0);
+  SaveBooleanToRegistry(RegistryPath, 'addon_' + AddonId, IsChecked);
+  end;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -1640,7 +1738,15 @@ end;
 
 procedure TMainForm.SkinPopupMenuPopup(Sender: TObject);
 begin
-  FIsPopUp := True;
+  if PlayButton.Enabled then
+  begin
+    FIsPopUp := True;
+  end else
+    begin
+      // Если процесс запуска игры уже начат, то запрещаем всплывать PopupMenu
+      FIsPopup := False;
+      Abort;
+    end;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

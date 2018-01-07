@@ -21,10 +21,10 @@ function CreateFile(
     OPEN_ALWAYS - если файл существует - открывает, если нет - создаёт и открывает
     OPEN_EXISTING - открывает, только если файл существует
     TRUNCATE_EXISTING - открывает и стирает содержимое
-	
+    
   CreatePathIfNotExists:
     True - создавать иерархию каталогов пути к файлу
-	False - не создавать папки 
+    False - не создавать папки
 }
 
 function FileExists(const FileName: string): Boolean;

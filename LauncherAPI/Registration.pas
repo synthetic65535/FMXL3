@@ -13,7 +13,7 @@ type
   TRegData = record
     Login    : string;
     Password : string;
-    SendHWID : Boolean;
+    HWID : string;
   end;
 
   // Статусные коды авторизации:
@@ -85,7 +85,7 @@ begin
 
   // Формируем запрос:
   Request := 'login=' + FRegData.Login + '&password=' + FRegData.Password;
-  if FRegData.SendHWID then Request := Request + '&hwid=' + GetHWID;
+  if FRegData.HWID <> '' then Request := Request + '&hwid=' + FRegData.HWID;
 
   // Отправляем запрос на сервер:
   HTTPSender := THTTPSender.Create;

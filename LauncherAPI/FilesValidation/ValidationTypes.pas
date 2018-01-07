@@ -32,6 +32,7 @@ type
       destructor Destroy; override;
 
       procedure Add(const RelativePath: string; const FileInfo: TValidFileInfo);
+      procedure Remove(const RelativePath: string);
       function  Get(const RelativePath: string; out   FileInfo: TValidFileInfo): Boolean;
       procedure Clear;
   end;
@@ -61,6 +62,14 @@ var
 begin
   FixedPath := LowerCase(FixSlashes(RelativePath));
   FValidFilesHashmap.Add(FixedPath, FileInfo);
+end;
+
+procedure TValidFiles.Remove(const RelativePath: string);
+var
+  FixedPath: string;
+begin
+  FixedPath := LowerCase(FixSlashes(RelativePath));
+  FValidFilesHashmap.Remove(FixedPath);
 end;
 
 function TValidFiles.Get(const RelativePath: string;

@@ -17,6 +17,13 @@ type
 
   TStringArray = array of string;
 
+  TAddonInfo = record
+    Name    : String;
+    Id      : String;
+    Enabled : Boolean;
+  end;
+
+  TAddonInfoArray = array of TAddonInfo;
 
   TServerInfo = record
     // Название и описание:
@@ -30,6 +37,7 @@ type
     // Файлы и папки:
     ClientFolder  : string; // Базовая папка, относительно которой берутся все остальные
     JarFolders    : TStringArray;
+    Addons        : TAddonInfoArray;
     NativesFolder : string;
     AssetsFolder  : string;
     AssetIndex    : string;
@@ -64,7 +72,6 @@ type
       destructor Destroy; override;
 
       procedure ExtractClientInfo(const ClientInfo: TClientInfo; const HostBaseFolder: string);
-      //procedure LoadInternalPreview;
 
       procedure SetValidationStatus(Status: Boolean);
       function GetValidationStatus: Boolean;
@@ -115,9 +122,10 @@ end;
 
 procedure TMinecraftLauncher.ExtractClientInfo(const ClientInfo: TClientInfo; const HostBaseFolder: string);
 var
-  JarFoldersArray, CheckedFoldersArray: TJSONArray;
+  JarFoldersArray, CheckedFoldersArray, AddonsArray: TJSONArray;
   PreviewLink: string;
   DownloadEvent: THandle;
+  I: Integer;
 begin
   Clear;
   if ClientInfo = nil then Exit;
@@ -130,10 +138,6 @@ begin
     var
       ResourceStream: TResourceStream;
     begin
-    {
-      if not DownloadImage(HostBaseFolder + '/' + PreviewLink, FPreviewBitmap) then
-        LoadInternalPreview;
-    }
       if (FindResource(hInstance, PChar(PreviewLink), RT_RCDATA) <> 0) then
         begin
           try
@@ -152,7 +156,6 @@ begin
   end
   else
   begin
-    //LoadInternalPreview;
     FHasPreview := False;
     SetEvent(DownloadEvent);
   end;
@@ -191,28 +194,28 @@ begin
   CheckedFoldersArray := GetJSONArrayValue(ClientInfo, 'checked_folders');
   FFilesValidator.ExtractCheckingsInfo(CheckedFoldersArray);
 
+  // Получаем список аддонов
+  AddonsArray := GetJSONArrayValue(ClientInfo, 'addons');
+  FFilesValidator.ExtractAddonsInfo(AddonsArray);
+
+  if AddonsArray <> nil then
+  begin
+    if AddonsArray.Count > 0 then
+    begin
+      SetLength(FServerInfo.Addons, AddonsArray.Count);
+      for I := 0 to AddonsArray.Count - 1 do
+      begin
+        FServerInfo.Addons[I].Id := GetJSONStringValue(GetJSONArrayElement(AddonsArray, I), 'id');
+        FServerInfo.Addons[I].Name := GetJSONStringValue(GetJSONArrayElement(AddonsArray, I), 'name');
+        FServerInfo.Addons[I].Enabled := GetJSONBooleanValue(GetJSONArrayElement(AddonsArray, I), 'enabled');
+      end;
+    end;
+  end;
+
   // Ждём, пока не загрузится превьюшка:
   WaitForSingleObject(DownloadEvent, INFINITE);
   CloseHandle(DownloadEvent);
 end;
-
-
-{
-procedure TMinecraftLauncher.LoadInternalPreview;
-var
-  ResourceStream: TResourceStream;
-begin
-  try
-    ResourceStream := TResourceStream.Create(hInstance, 'DEFAULT_PREVIEW', RT_RCDATA);
-    FPreviewBitmap.LoadFromStream(ResourceStream);
-    FreeAndNil(ResourceStream);
-  except
-    FPreviewBitmap.Clear($00000000);
-  end;
-end;
-}
-
-
 
 procedure TMinecraftLauncher.SetValidationStatus(Status: Boolean);
 begin

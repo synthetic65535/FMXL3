@@ -6,7 +6,7 @@ uses
   Windows, SysUtils, Classes, System.NetEncoding, System.JSON, JSONUtils,
   Authorization, Registration, SkinSystem, FilesValidation, MinecraftLauncher,
   UserInformation, JavaInformation, ServersInformation, LauncherInformation,
-  Encryption, HTTPUtils, HTTPMultiLoader, StringsAPI, JNIWrapper;
+  Encryption, HTTPUtils, HTTPMultiLoader, StringsAPI, JNIWrapper, HWID;
 
 type
   QUERY_STATUS_CODE = (
@@ -182,7 +182,9 @@ var
 begin
   RegData.Login    := EncryptData(Login);
   RegData.Password := EncryptData(Password);
-  RegData.SendHWID := SendHWID;
+  if SendHWID then
+    RegData.HWID   := EncryptData(GetHWID) else
+    RegData.HWID   := '';
 
   // Создаём поток регистрации:
   FRegWorker := TRegWorker.Create(True);
@@ -207,7 +209,10 @@ var
 begin
   AuthData.Login    := EncryptData(Login);
   AuthData.Password := EncryptData(Password);
-  AuthData.SendHWID := SendHWID;
+  AuthData.HWID     := EncryptData(GetHWID);
+  if SendHWID then
+    AuthData.HWID   := EncryptData(GetHWID) else
+    AuthData.HWID   := '';
 
   // Создаём поток авторизации:
   FAuthWorker := TAuthWorker.Create(True);
@@ -439,6 +444,7 @@ end;
 function TLauncherAPI.ValidateClient(ClientNumber: Integer; Multithreading: Boolean; OnValidate: TOnValidate): Boolean;
 var
   ValidationThread: TThread;
+
 begin
   if (ClientNumber < 0) or (ClientNumber >= FClients.Count) then Exit(False);
   if FClients.ClientsArray[ClientNumber].GetValidationStatus then Exit(False);
@@ -448,9 +454,11 @@ begin
   ValidationThread := TThread.CreateAnonymousThread(procedure()
   var
     RelativeClientWorkingFolder, RelativeJavaWorkingFolder: string;
+    I: Integer;
     ClientValidationStatus, JavaValidationStatus: VALIDATION_STATUS;
   begin
     RelativeClientWorkingFolder := FixSlashes(FClients.ClientsArray[ClientNumber].ServerInfo.ClientFolder);
+    
     ClientValidationStatus := FClients.ClientsArray[ClientNumber].FilesValidator.Validate(FBaseFolder, RelativeClientWorkingFolder, Multithreading);
 
     JavaValidationStatus := VALIDATION_STATUS_SUCCESS;

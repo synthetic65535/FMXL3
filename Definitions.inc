@@ -14,7 +14,7 @@
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-{$DEFINE ENABLE_EXECUTABLE_MEMORY_DEFENCE} // Защита от инъекций
+//{$DEFINE ENABLE_EXECUTABLE_MEMORY_DEFENCE} // Защита от инъекций
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 

@@ -1,4 +1,5 @@
 DEFAULT_SKIN RCDATA Images\DefaultSkin.png
+DEFAULT_CLOAK RCDATA Images\DefaultCloak.png
 PREVIEW_CLASSIC RCDATA Images\Classic.png
 PREVIEW_INDUSTRIAL RCDATA Images\Industrial.png
 PREVIEW_MAGIC RCDATA Images\Magic.png

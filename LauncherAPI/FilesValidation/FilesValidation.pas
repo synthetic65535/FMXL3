@@ -7,11 +7,12 @@ uses
   System.JSON, System.Threading, Generics.Collections,
   ValidationTypes, FilesScanner, JSONUtils,
   FileAPI, FilesNotifier, CodepageAPI, StringsAPI,
-  cHash;
+  cHash, RegistryUtils, LauncherSettings;
 
 type
   TCheckingsInfo  = TJSONArray;
   TValidFilesJSON = TJSONArray;
+  TAddonsJSON  = TJSONArray;
 
   VALIDATION_STATUS = (
     VALIDATION_STATUS_SUCCESS,        // Все файлы прошли проверку
@@ -19,7 +20,24 @@ type
     VALIDATION_STATUS_NEED_UPDATE     // Требуется обновление
   );
 
+  TAddonInfo = class
+      FId      : string;      // Идентификатор аддона
+      FName    : string;      // Имя аддона
+      FEnabled : Boolean;     // Включен ли аддон
+      FFiles   : TStringList; // Файлы аддона
+    public
+      property Id  : string read FId write FId;
+      property Name  : string read FName write FName;
+      property Files  : TStringList read FFiles write FFiles;
+      property Enabled : Boolean read FEnabled write FEnabled;
+      constructor Create;
+      destructor Destroy; override;
+      procedure Clear;
+      procedure Update; // Обновить состояние Enabled из реестра
+  end;
+
   TCheckingsList = array of TFilesScannerStruct; // Список файлов и папок на проверку
+  TAddonsList = array of TAddonInfo; // Список аддонов
   TOnFilesMismatching = reference to procedure(const ErrorFiles: TStringList);
 
   TFilesValidator = class
@@ -30,11 +48,13 @@ type
       FCriticalSection: _RTL_CRITICAL_SECTION; // Критическая секция для многопоточной работы со списками
 
       FCheckingsList : TCheckingsList;   // Список файлов и папок на проверку
+      FAddonsList    : TAddonsList;      // Список аддонов
       FValidFiles    : TValidFiles;      // Список верных файлов
       FErrorFiles    : TStringList;      // Список файлов, которые не удалось удалить при проверке
       FAbsentFiles   : TAbsentFilesList; // Список отсутствующих файлов
 
-      FLocalFiles: array of TStringList;
+      FLocalFiles          : array of TStringList;
+      FDisabledAddonsFiles : TStringList; // Отсортированный для быстрого поиска список файлов из выключенных аддонов
 
       FWatchers: array of TFilesNotifier;
 
@@ -58,13 +78,18 @@ type
       destructor Destroy; override;
 
       procedure ExtractCheckingsInfo(const CheckingsInfo: TCheckingsInfo);
+      procedure ExtractAddonsInfo(const AddonsInfo: TAddonsJSON);
       procedure ExtractValidFilesInfo(const ValidFilesJSON: TValidFilesJSON);
+      procedure FillDisabledAddonFiles;
+      procedure RemoveDisabledAddonsFromAbsent;
+      procedure UpdateAddonsInfo;
       function Validate(const BaseFolder, RelativeWorkingFolder: string; Multithreading: Boolean = True): VALIDATION_STATUS;
 
       procedure StartFoldersWatching(const ClientFolder: string; OnFilesMismatching: TOnFilesMismatching);
       procedure StopFoldersWatching;
 
       procedure ClearCheckingsList;
+      procedure ClearAddonsList;
       procedure ClearFilesLists;
       procedure ClearValidFilesList;
       procedure Clear;
@@ -163,6 +188,7 @@ var
   RelativePath  : string;
   FileSize      : Integer;
   ValidFileInfo : TValidFileInfo;
+  TempInteger   : Integer;
 begin
   RelativePath := GetRelativePath(FilePath, FBaseFolder + '\');
 
@@ -187,6 +213,14 @@ begin
     TryToDeleteFile(FilePath);
     Exit;
   end;
+
+  // Если файл принадлежит выключенному аддону - удаляем:
+  if FDisabledAddonsFiles.Count > 0 then
+    if FDisabledAddonsFiles.Find(AnsiLowerCase(FilePath), TempInteger) then
+      begin
+        TryToDeleteFile(FilePath);
+        Exit;
+      end;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -299,9 +333,10 @@ end;
 constructor TFilesValidator.Create;
 begin
   InitializeCriticalSection(FCriticalSection);
-  FValidFiles  := TValidFiles.Create;
-  FErrorFiles  := TStringList.Create;
-  FAbsentFiles := TAbsentFilesList.Create;
+  FValidFiles           := TValidFiles.Create;
+  FErrorFiles           := TStringList.Create;
+  FDisabledAddonsFiles  := TStringList.Create;
+  FAbsentFiles          := TAbsentFilesList.Create;
   Clear;
 end;
 
@@ -313,6 +348,7 @@ begin
   FreeAndNil(FValidFiles);
   FreeAndNil(FErrorFiles);
   FreeAndNil(FAbsentFiles);
+  FreeAndNil(FDisabledAddonsFiles);
   DeleteCriticalSection(FCriticalSection);
   inherited;
 end;
@@ -360,10 +396,51 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+procedure TFilesValidator.ExtractAddonsInfo(
+  const AddonsInfo: TAddonsJSON);
+begin
+  ClearFilesLists;
+  ClearAddonsList;
+
+  if AddonsInfo = nil then Exit;
+  if AddonsInfo.Count = 0 then Exit;
+
+  SetLength(FAddonsList, AddonsInfo.Count);
+  TParallel.&For(0, AddonsInfo.Count - 1, procedure(I: Integer)
+  var
+    AddonsElement, FilesElement: TJSONObject;
+    FilesArray: TJSONArray;
+    J: Integer;
+  begin
+    AddonsElement := GetJSONArrayElement(AddonsInfo, I);
+
+    FAddonsList[I] := TAddonInfo.Create;
+    with FAddonsList[I] do
+    begin
+      Id        := GetJSONStringValue (AddonsElement, 'id');
+      Name      := GetJSONStringValue (AddonsElement, 'name');
+      Enabled   := GetJSONBooleanValue(AddonsElement, 'enabled');
+    end;
+
+    // Получаем список файлов
+    FilesArray := GetJSONArrayValue(AddonsElement, 'files');
+    if FilesArray = nil then Exit;
+    if FilesArray.Count = 0 then Exit;
+
+    for J := 0 to FilesArray.Count - 1 do
+    begin
+      FilesElement := GetJSONArrayElement(FilesArray, J);
+      FAddonsList[I].Files.Add(GetJSONStringValue(FilesElement, 'name'));
+    end;
+  end);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 procedure TFilesValidator.ExtractValidFilesInfo(
   const ValidFilesJSON: TValidFilesJSON);
 var
-  I: Integer;
+  I : Integer;
   ValidFileJSON   : TJSONObject;
   ValidFileInfo   : TValidFileInfo;
 begin
@@ -382,12 +459,15 @@ begin
     ValidFileInfo.Size := GetJSONIntValue   (ValidFileJSON, 'size');
     ValidFileInfo.Hash := GetJSONStringValue(ValidFileJSON, 'hash');
     ValidFileInfo.Link := GetJSONStringValue(ValidFileJSON, 'path');
+
+    // Добавляем файл
     FValidFiles.Add(ValidFileInfo.Link, ValidFileInfo);
   end;
 end;
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
+// Эта функция вызывается при запуске клиента дважды: при проверке файлов клиента и при проверке файлов JVM
 function TFilesValidator.Validate(const BaseFolder,
   RelativeWorkingFolder: string; Multithreading: Boolean): VALIDATION_STATUS;
 {$IFDEF DEBUG}
@@ -396,21 +476,26 @@ var
   AbsentFilesList: TStringList;
 {$ENDIF}
 begin
+
   if FValidFiles.ValidFilesHashmap.Count = 0 then Exit(VALIDATION_STATUS_SUCCESS);
 
-  FBaseFolder          := BaseFolder;
-  FRelativeWorkingPath := RelativeWorkingFolder;
+  FBaseFolder                := BaseFolder;
+  FRelativeWorkingPath       := RelativeWorkingFolder;
 
   // Чистим списки файлов:
   ClearFilesLists;
 
-  // Делаем проверку файлов, удаляем не прошедшие проверку:
-  FillLocalFilesArray(Multithreading);   // Заполняем список локальных файлов в соответствии с проверками
-  ValidateAllFilesLists(Multithreading); // Проходимся по всем спискам локальных файлов и проверяем каждый файл в них
-  ClearLocalFilesArray(Multithreading);  // Освобождаем память, занятую под списки локальных файлов
+  UpdateAddonsInfo(); // Обновляем информацию о выключенных аддонах
+  FillDisabledAddonFiles(); // Собираем файлы из выключенных аддонов в один список
 
-  // Получаем список недостающих файлов:
-  FillAbsentFilesList(Multithreading);
+  // Делаем проверку файлов, удаляем не прошедшие проверку:
+  FillLocalFilesArray(Multithreading);          // Заполняем список локальных файлов в соответствии с проверками
+  ValidateAllFilesLists(Multithreading);        // Проходимся по всем спискам локальных файлов и проверяем каждый файл в них
+  ClearLocalFilesArray(Multithreading);         // Освобождаем память, занятую под списки локальных файлов
+
+  FillAbsentFilesList(Multithreading); // Получаем список недостающих файлов:
+
+  RemoveDisabledAddonsFromAbsent(); // Удаляем файлы выключенных аддонов из списка недостающих файлов, чтобы не закачивать их заново
 
   {$IFDEF DEBUG}
     if FErrorFiles.Count > 0 then FErrorFiles.SaveToFile('ErrorFiles.txt');
@@ -500,6 +585,60 @@ end;
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
+procedure TFilesValidator.RemoveDisabledAddonsFromAbsent();
+var
+  I           : Integer;
+  TempInteger : Integer;
+begin
+  if FDisabledAddonsFiles.Count > 0 then
+  begin
+    I := 0;
+    while I < FAbsentFiles.Count do
+      if FDisabledAddonsFiles.Find(AnsiLowerCase(FixSlashes(FBaseFolder + '\' + FAbsentFiles[I].Link)), TempInteger) then
+        FAbsentFiles.Delete(I) else
+        Inc(I);
+  end;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TFilesValidator.FillDisabledAddonFiles();
+var
+  AddonsCount, AddonFilesCount: Integer;
+  I, J: Integer;
+begin
+  FDisabledAddonsFiles.Clear;
+  AddonsCount := Length(FAddonsList);
+  if AddonsCount = 0 then Exit;
+
+  for I := 0 to AddonsCount - 1 do
+  begin
+    if not FAddonsList[I].Enabled then
+      begin
+      AddonFilesCount := FAddonsList[I].Files.Count;
+      if AddonFilesCount > 0 then
+        for J := 0 to AddonFilesCount - 1 do
+          FDisabledAddonsFiles.Add(AnsiLowerCase(FixSlashes(FBaseFolder + '\' + FRelativeWorkingPath + '\' + FAddonsList[I].Files[J])));
+      end;
+  end;
+  FDisabledAddonsFiles.Sort; // Сортируем для быстрого поиска
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TFilesValidator.UpdateAddonsInfo;
+var
+  AddonsCount: Integer;
+  I: Integer;
+begin
+  AddonsCount := Length(FAddonsList);
+  if AddonsCount = 0 then Exit;
+  
+  for I := 0 to AddonsCount - 1 do
+    FAddonsList[i].Update;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 procedure TFilesValidator.ClearCheckingsList;
 var
@@ -519,6 +658,20 @@ begin
       FreeAndNil(FCheckingsList[I].Exclusives);
     end;
   end);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TFilesValidator.ClearAddonsList;
+var
+  AddonsListCount: Integer;
+  I: Integer;
+begin
+  AddonsListCount := Length(FAddonsList);
+  if AddonsListCount = 0 then Exit;
+
+  for I := 0 to AddonsListCount - 1 do
+    FAddonsList[I].Clear;
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -544,6 +697,42 @@ begin
   ClearFilesLists;
   ClearValidFilesList;
   ClearCheckingsList;
+  ClearAddonsList;
 end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TAddonInfo.Update;
+begin
+  FEnabled := ReadBooleanFromRegistry(RegistryPath, 'addon_' + FId, FEnabled);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+procedure TAddonInfo.Clear;
+begin
+  FFiles.Clear;
+  Id := '';
+  FName := '';
+  FEnabled := false;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+constructor TAddonInfo.Create;
+begin
+  FFiles := TStringList.Create;
+  Clear;
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+destructor TAddonInfo.Destroy;
+begin
+  Clear;
+  FreeAndNil(FFiles);
+end;
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 end.

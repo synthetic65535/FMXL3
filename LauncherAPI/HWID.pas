@@ -175,7 +175,7 @@ finally
 SMBios.Free;
 end;
 
-Result := 'COM' + MD5DigestToHex(CalcMD5(hwid));
+Result := MD5DigestToHex(CalcMD5(hwid));
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -199,9 +199,10 @@ begin
 
   if Length(Result) = 0 then Result := 'UNKNOWN';
 
-Result := Result + ':' + MainForm.ComplexHwid {GetComplexHWID()};
+Result := Result + ':' + 'COM' + MainForm.ComplexHwid;
 Result := SanitizeString(Result);
-
+Result := Result + ':' + 'CHK' + MD5DigestToHex(CalcMD5(Result));
 end;
 
 end.
+
