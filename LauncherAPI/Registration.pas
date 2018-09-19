@@ -9,13 +9,6 @@ type
   TRegResponse = TJSONObject;
   PRegResponse = ^TRegResponse;
 
-  // Структура с даными пользователя, которую передаём потоку регистрации:
-  TRegData = record
-    Login    : string;
-    Password : string;
-    HWID : string;
-  end;
-
   // Статусные коды авторизации:
   REG_STATUS_CODE = (
     REG_STATUS_SUCCESS,          // Успешная регистрация
@@ -37,7 +30,7 @@ type
   TRegWorker = class(TThread)
     private
       FRegStatus        : REG_STATUS;
-      FRegData          : TRegData;
+      FRegData          : string;
       FRegResponse      : PRegResponse;
       FOnReg            : TOnReg;
       FRegScriptAddress : string;
@@ -47,7 +40,7 @@ type
 
       procedure RegisterPlayer(
                            const RegScriptAddress : string;       // Адрес скрипта авторизации
-                           const RegData          : TRegData;     // Данные, отправляемые скрипту
+                           const RegData          : string;       // Данные, отправляемые скрипту
                            out   RegResponse      : TRegResponse; // JSON-ответ от скрипта
                            OnReg                  : TOnReg        // Событие завершения авторизации
                           );
@@ -59,7 +52,7 @@ implementation
 
 { TRegWorker }
 
-procedure TRegWorker.RegisterPlayer(const RegScriptAddress: string; const RegData: TRegData;
+procedure TRegWorker.RegisterPlayer(const RegScriptAddress: string; const RegData: string;
   out RegResponse: TRegResponse; OnReg: TOnReg);
 begin
   // Параметры авторизации:
@@ -84,8 +77,7 @@ begin
   inherited;
 
   // Формируем запрос:
-  Request := 'login=' + FRegData.Login + '&password=' + FRegData.Password;
-  if FRegData.HWID <> '' then Request := Request + '&hwid=' + FRegData.HWID;
+  Request := FRegData;
 
   // Отправляем запрос на сервер:
   HTTPSender := THTTPSender.Create;

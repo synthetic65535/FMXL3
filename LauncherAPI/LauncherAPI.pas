@@ -56,6 +56,8 @@ type
 
       // Авторизация:
       FAuthResponse : TAuthResponse;
+      FPreAuthResponse : TAuthResponse;
+      FPreAuthWorker : TAuthWorker;
       FAuthWorker   : TAuthWorker;
       FIsAuthorized : Boolean;
 
@@ -63,7 +65,7 @@ type
       FSkinSystem: TSkinSystemWrapper;
 
       function EncryptData(const Data: string): string;
-      function  QueryValidFilesJSON(const Link: string; const FilesValidator: TFilesValidator): QUERY_STATUS_CODE;
+      function QueryValidFilesJSON(const Link: string; const FilesValidator: TFilesValidator): QUERY_STATUS_CODE;
       procedure QueryValidFilesThreadProc(ClientNumber: Integer; out QueryStatus: QUERY_STATUS);
       procedure StartDownloader(const DownloadList: TDownloadList; const MultiLoader: THTTPMultiLoader; ClientNumber: Integer; Multithreading: Boolean; OnUpdate: TOnUpdate);
       procedure MergeDownloadLists(const List1, List2, ResultList: TDownloadList);
@@ -164,27 +166,36 @@ begin
   inherited;
 end;
 
-
 function TLauncherAPI.EncryptData(const Data: string): string;
+var
+  S: AnsiString;
 begin
-  Result := Data;
-  EncryptDecryptVerrnam(Result, PAnsiChar(FEncryptionKey), Length(FEncryptionKey));
-  Result := TNetEncoding.Base64.Encode(Result);
-  Result := ReplaceParam(Result, '+', '-');
-  Result := ReplaceParam(Result, '/', '_');
+  S := Data;
+  EncryptRijndael(S, FEncryptionKey);
+  Result := S;
 end;
-
 
 procedure TLauncherAPI.RegisterPlayer(const Login, Password: string;
   SendHWID: Boolean; OnReg: TOnReg);
 var
-  RegData: TRegData;
+  RegData: string;
 begin
-  RegData.Login    := EncryptData(Login);
-  RegData.Password := EncryptData(Password);
   if SendHWID then
-    RegData.HWID   := EncryptData(GetHWID) else
-    RegData.HWID   := '';
+  begin
+    RegData := EncryptData('{' +
+    '"action":"auth",' +
+    '"login":"' + Login + '",' +
+    '"password":"' + HexEncode(Password) + '",' +
+    '"hwid":"' + GetHWID() +
+    '"}');
+  end else
+    begin
+      RegData := EncryptData('{' +
+      '"action":"auth",' +
+      '"login":"' + Login + '",' +
+      '"password":"' + Password +
+      '"}');
+    end;
 
   // Создаём поток регистрации:
   FRegWorker := TRegWorker.Create(True);
@@ -204,76 +215,122 @@ end;
 procedure TLauncherAPI.Authorize(const Login, Password: string;
   SendHWID: Boolean; OnAuth: TOnAuth);
 var
-  AuthData: TAuthData;
+  PreAuthData: string;
+  GlobalPreAuthStatus: AUTH_STATUS;
+
+  AuthData: string;
   GlobalAuthStatus: AUTH_STATUS;
 begin
-  AuthData.Login    := EncryptData(Login);
-  AuthData.Password := EncryptData(Password);
+  PreAuthData := EncryptData('{' +
+    '"action":"preauth",' +
+    '"login":"' + Login + '",' +
+    '"password":"' + HexEncode(Password) +
+    '"}');
 
-  if SendHWID then
-    AuthData.HWID   := EncryptData(GetHWID) else
-    AuthData.HWID   := '';
+  // Создаём поток первого этапа авторизации:
+  FPreAuthWorker := TAuthWorker.Create(True);
+  FPreAuthWorker.EncryptionKey := FEncryptionKey;
+  FPreAuthWorker.Authorize(
+    FServerBaseAddress + '/' + AuthScriptName,
+    PreAuthData,
+    true, // Первый этап
+    FPreAuthResponse,
+    procedure(const PreAuthStatus: AUTH_STATUS)
+    begin
+     if PreAuthStatus.StatusCode = AUTH_STATUS_SUCCESS then
+     begin
+      if SendHWID then
+      begin
+        AuthData := EncryptData('{' +
+        '"action":"auth",' +
+        '"login":"' + Login + '",' +
+        '"password":"' + HexEncode(Password) + '",' +
+        '"hwid":"' + GetHWID() + '",' +
+        '"token":"' + PreAuthStatus.TokenString +
+        '"}');
+      end else
+        begin
+          AuthData := EncryptData('{' +
+          '"action":"auth",' +
+          '"login":"' + Login + '",' +
+          '"password":"' + HexEncode(Password) + '",' +
+          '"token":"' + PreAuthStatus.TokenString +
+          '"}');
+        end;
 
-  // Создаём поток авторизации:
-  FAuthWorker := TAuthWorker.Create(True);
-  FAuthWorker.EncryptionKey := FEncryptionKey;
-  FAuthWorker.Authorize(
-                         FServerBaseAddress + '/' + AuthScriptName,
-                         AuthData,
-                         FAuthResponse,
-                         procedure(const AuthStatus: AUTH_STATUS)
-                         var
-                           ServersInfo: TJSONObject;
-                         begin
-                           if AuthStatus.StatusCode = AUTH_STATUS_SUCCESS then
-                           begin
-                             // Получаем информацию о лаунчере:
-                             if not FLauncherInfo.ExtractLauncherInfo(FAuthResponse) then
-                             begin
-                               GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
-                               GlobalAuthStatus.StatusString := 'Не удалось получить информацию о лаунчере!';
-                               if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
-                               FreeAndNil(FAuthResponse);
-                               Exit;
-                             end;
+      // Создаём поток второго этапа авторизации:
+      FAuthWorker := TAuthWorker.Create(True);
+      FAuthWorker.EncryptionKey := FEncryptionKey;
+      FAuthWorker.Authorize(
+        FServerBaseAddress + '/' + AuthScriptName,
+        AuthData,
+        false, // Второй этап
+        FAuthResponse,
+        procedure(const AuthStatus: AUTH_STATUS)
+        var
+         ServersInfo: TJSONObject;
+        begin
+         if AuthStatus.StatusCode = AUTH_STATUS_SUCCESS then
+         begin
+           // Получаем информацию о лаунчере:
+           if not FLauncherInfo.ExtractLauncherInfo(FAuthResponse) then
+           begin
+             GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
+             GlobalAuthStatus.StatusString := 'Не удалось получить информацию о лаунчере!';
+             if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
+             FreeAndNil(FAuthResponse);
+             Exit;
+           end;
 
-                             // Получаем информацию о пользователе:
-                             if not FUserInfo.ExtractUserInfo(FAuthResponse) then
-                             begin
-                               GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
-                               GlobalAuthStatus.StatusString := 'Не удалось получить авторизационные данные игрока!';
-                               if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
-                               FreeAndNil(FAuthResponse);
-                               Exit;
-                             end;
+           // Получаем информацию о пользователе:
+           if not FUserInfo.ExtractUserInfo(FAuthResponse) then
+           begin
+             GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
+             GlobalAuthStatus.StatusString := 'Не удалось получить авторизационные данные игрока!';
+             if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
+             FreeAndNil(FAuthResponse);
+             Exit;
+           end;
 
-                             ServersInfo := GetJSONObjectValue(FAuthResponse, 'servers_info');
+           ServersInfo := GetJSONObjectValue(FAuthResponse, 'servers_info');
 
-                             // Получаем информацию о серверах:
-                             if not FClients.ExtractServersInfo(ServersInfo, FServerBaseAddress) then
-                             begin
-                               GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
-                               GlobalAuthStatus.StatusString := 'Не удалось получить информацию о серверах!';
-                               if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
-                               FreeAndNil(FAuthResponse);
-                               Exit;
-                             end;
+           // Получаем информацию о серверах:
+           if not FClients.ExtractServersInfo(ServersInfo, FServerBaseAddress) then
+           begin
+             GlobalAuthStatus.StatusCode := AUTH_STATUS_UNKNOWN_ERROR;
+             GlobalAuthStatus.StatusString := 'Не удалось получить информацию о серверах!';
+             if Assigned(OnAuth) then OnAuth(GlobalAuthStatus);
+             FreeAndNil(FAuthResponse);
+             Exit;
+           end;
 
-                             // Получаем информацию о джаве:
-                             FJavaInfo.ExtractJavaInfo(ServersInfo);
+           // Получаем информацию о джаве:
+           FJavaInfo.ExtractJavaInfo(ServersInfo);
 
-                             FIsAuthorized := True;
+           FIsAuthorized := True;
 
-                             if Assigned(OnAuth) then OnAuth(AuthStatus);
-                           end
-                           else
-                           begin
-                             if Assigned(OnAuth) then OnAuth(AuthStatus);
-                           end;
+           // Успешная авторизация
+           if Assigned(OnAuth) then OnAuth(AuthStatus);
+         end
+         else
+         begin
+           // Не удался второй этап авторизации
+           if Assigned(OnAuth) then OnAuth(AuthStatus);
+         end;
 
-                           FreeAndNil(FAuthResponse);
-                         end
-                        );
+         FreeAndNil(FAuthResponse);
+        end
+        );
+     end
+     else
+     begin
+       // Не удался первый этап авторизации
+       if Assigned(OnAuth) then OnAuth(PreAuthStatus);
+     end;
+
+     FreeAndNil(FPreAuthResponse);
+    end
+    );
 end;
 
 
@@ -284,14 +341,17 @@ var
   Response: TStringStream;
   ValidFilesJSON: TJSONObject;
   ValidFilesJSONArray: TJSONArray;
+  TempDataLength: Cardinal;
 begin
   HTTPSender := THTTPSender.Create;
   Response := TStringStream.Create;
   HTTPSender.GET(Link, Response);
 
-  if HTTPSender.Status then
+  if HTTPSender.Status and (Response.Size > 0) then
   begin
-    EncryptDecryptVerrnam(Response.Memory, Response.Size, PAnsiChar(FEncryptionKey), Length(FEncryptionKey));
+    TempDataLength := Response.Size;
+    DecryptRijndael(Response.Memory, TempDataLength, FEncryptionKey);
+    Response.Size := TempDataLength;
     ValidFilesJSON := JSONStringToJSONObject(Response.DataString);
     if ValidFilesJSON <> nil then
     begin
@@ -339,7 +399,6 @@ begin
     SetEvent(DownloadEvents.Client);
   end).Start;
 
-
   // Если надо - скачиваем список файлов джавы:
   if not FJavaInfo.ExternalJava then
   begin
@@ -351,7 +410,6 @@ begin
       SetEvent(DownloadEvents.Java);
     end).Start;
   end;
-  
 
   WaitForMultipleObjects(2, @DownloadEvents, TRUE, INFINITE);
   
@@ -626,13 +684,13 @@ end;
 function TLauncherAPI.SetupSkin(const Login, Password,
   SkinPath: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.SetupImage(FServerBaseAddress + '/' + SkinSystemScriptName, EncryptData(Login), EncryptData(Password), SkinPath, IMAGE_SKIN, FUserInfo);
+  Result := FSkinSystem.SetupImage(FServerBaseAddress + '/' + SkinSystemScriptName, Login, Password, SkinPath, IMAGE_SKIN, FUserInfo);
 end;
 
 function TLauncherAPI.SetupCloak(const Login, Password,
   CloakPath: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.SetupImage(FServerBaseAddress + '/' + SkinSystemScriptName, EncryptData(Login), EncryptData(Password), CloakPath, IMAGE_CLOAK, FUserInfo);
+  Result := FSkinSystem.SetupImage(FServerBaseAddress + '/' + SkinSystemScriptName, Login, Password, CloakPath, IMAGE_CLOAK, FUserInfo);
 end;
 
 
@@ -640,13 +698,13 @@ end;
 function TLauncherAPI.DeleteSkin(const Login,
   Password: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.DeleteImage(FServerBaseAddress + '/' + SkinSystemScriptName, EncryptData(Login), EncryptData(Password), IMAGE_SKIN, FUserInfo);
+  Result := FSkinSystem.DeleteImage(FServerBaseAddress + '/' + SkinSystemScriptName, Login, Password, IMAGE_SKIN, FUserInfo);
 end;
 
 function TLauncherAPI.DeleteCloak(const Login,
   Password: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.DeleteImage(FServerBaseAddress + '/' + SkinSystemScriptName, EncryptData(Login), EncryptData(Password), IMAGE_CLOAK, FUserInfo);
+  Result := FSkinSystem.DeleteImage(FServerBaseAddress + '/' + SkinSystemScriptName, Login, Password, IMAGE_CLOAK, FUserInfo);
 end;
 
 
@@ -654,14 +712,14 @@ end;
 function TLauncherAPI.DownloadSkin(const Login, Password,
   Destination: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.DownloadImage(FServerBaseAddress + '/' + SkinSystemScriptName, Destination, EncryptData(Login), EncryptData(Password), IMAGE_SKIN);
+  Result := FSkinSystem.DownloadImage(FServerBaseAddress + '/' + SkinSystemScriptName, Destination, Login, Password, IMAGE_SKIN);
 end;
 
 
 function TLauncherAPI.DownloadCloak(const Login, Password,
   Destination: string): SKIN_SYSTEM_STATUS;
 begin
-  Result := FSkinSystem.DownloadImage(FServerBaseAddress + '/' + SkinSystemScriptName, Destination, EncryptData(Login), EncryptData(Password), IMAGE_CLOAK);
+  Result := FSkinSystem.DownloadImage(FServerBaseAddress + '/' + SkinSystemScriptName, Destination, Login, Password, IMAGE_CLOAK);
 end;
 
 

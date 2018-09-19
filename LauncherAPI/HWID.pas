@@ -92,8 +92,8 @@ end;
 
 function SanitizeString(s: string): string;
 var
-  i:integer;
-  whitelist: set of char;
+  i: Integer;
+  whitelist: set of AnsiChar;
   temp: string;
 begin
 temp := '';
@@ -102,11 +102,11 @@ whitelist := ['A'..'Z','a'..'z','0'..'9',':'];
 
 if length(s) > 0 then
   for i := 1 to length(s) do
-    if s[i] in whitelist then
+    if CharInSet(s[i], whitelist) then
+    //if s[i] in whitelist then
       temp := temp + s[i];
 
 Result := AnsiUpperCase(temp);
-
 end;
 
 

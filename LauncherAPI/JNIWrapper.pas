@@ -3,7 +3,7 @@
 interface
 
 uses
-  Windows, Classes, CodepageAPI;
+  Windows, Classes, CodepageAPI, AuxUtils;
 
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
@@ -101,6 +101,8 @@ var
   RegisterNativesHookInfo: THookInfo;
 }
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 function SetExitHook(JNIEnv: PJNIEnv): Boolean;
   procedure ExitHook(JNIEnv: PJNIEnv; Code: JInt); stdcall;
   begin
@@ -125,6 +127,8 @@ begin
   Result := RegisterStatus >= 0;
 end;
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 {
 function HookedRegisterNatives(Env: PJNIEnv; AClass: JClass; const Methods: PJNINativeMethod; NMethods: JInt): JInt; stdcall;
 var
@@ -138,6 +142,135 @@ begin
     Result := 0;
 end;
 }
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+type
+ PUNICODE_STRING = ^UNICODE_STRING;
+
+ UNICODE_STRING = record
+   Length: USHORT;
+   MaximumLength: USHORT;
+   Buffer: PWideChar;
+ end;
+
+ CLIENT_ID = record
+   UniqueProcess: THandle;
+   UniqueThread: THandle;
+ end;
+
+ PCLIENT_ID = ^CLIENT_ID;
+
+ KPRIORITY = Integer;
+
+ _KWAIT_REASON = (
+   Executive,
+   FreePage,
+   PageIn,
+   PoolAllocation,
+   DelayExecution,
+   Suspended,
+   UserRequest,
+   WrExecutive,
+   WrFreePage,
+   WrPageIn,
+   WrPoolAllocation,
+   WrDelayExecution,
+   WrSuspended,
+   WrUserRequest,
+   WrEventPair,
+   WrQueue,
+   WrLpcReceive,
+   WrLpcReply,
+   WrVirtualMemory,
+   WrPageOut,
+   WrRendezvous,
+   WrKeyedEvent,
+   WrTerminated,
+   WrProcessInSwap,
+   WrCpuRateControl,
+   WrCalloutStack,
+   WrKernel,
+   WrResource,
+   WrPushLock,
+   WrMutex,
+   WrQuantumEnd,
+   WrDispatchInt,
+   WrPreempted,
+   WrYieldExecution,
+   WrFastMutex,
+   WrGuardedMutex,
+   WrRundown,
+   MaximumWaitReason);
+ KWAIT_REASON = _KWAIT_REASON;
+
+ SYSTEM_THREADS = record
+   KernelTime: FILETIME;
+   UserTime: FILETIME;
+   CreateTime: FILETIME;
+   WaitTime: ULONG;
+   StartAddress: PVOID;
+   ClientId: CLIENT_ID;
+   Priority: KPRIORITY;
+   BasePriority: KPRIORITY;
+   ContextSwitches: ULONG;
+   ThreadState: ULONG;
+   WaitReason: KWAIT_REASON;
+   Reserved : ULONG;
+ end;
+
+ SYSTEM_PROCESS_INFORMATION = record
+   NextEntryOffset: ULONG;
+   NumberOfThreads: ULONG;
+   WorkingSetPrivateSize: Int64;
+   HardFaultCount: ULONG;
+   NumberOfThreadsHighWatermark: ULONG;
+   CycleTime: ULONGLONG;
+   CreateTime: FILETIME;
+   UserTime: FILETIME;
+   KernelTime: FILETIME;
+   ImageName: UNICODE_STRING;
+   BasePriority: KPRIORITY;
+   UniqueProcessId: THandle;
+   InheritedFromUniqueProcessId: THandle;
+   HandleCount: ULONG;
+   SessionId: ULONG;
+   UniqueProcessKey: ULONG_PTR;
+   PeakVirtualSize: SIZE_T;
+   VirtualSize: SIZE_T;
+   PageFaultCount: ULONG;
+   PeakWorkingSetSize: SIZE_T;
+   WorkingSetSize: SIZE_T;
+   QuotaPeakPagedPoolUsage: SIZE_T;
+   QuotaPagedPoolUsage: SIZE_T;
+   QuotaPeakNonPagedPoolUsage: SIZE_T;
+   QuotaNonPagedPoolUsage: SIZE_T;
+   PagefileUsage: SIZE_T;
+   PeakPagefileUsage: SIZE_T;
+   PrivatePageCountp: SIZE_T;
+   ReadOperationCount: Int64;
+   WriteOperationCount: Int64;
+   OtherOperationCount: Int64;
+   ReadTransferCount: Int64;
+   WriteTransferCount: Int64;
+   OtherTransferCount: Int64;
+   Threads: array [0 .. 0] of SYSTEM_THREADS;
+ end;
+
+ PSYSTEM_PROCESS_INFORMATION = ^SYSTEM_PROCESS_INFORMATION;
+
+type
+ NTSTATUS = System.LongInt;
+
+const
+ STATUS_SUCCESS = NTSTATUS($00000000);
+ STATUS_INFO_LENGTH_MISMATCH = NTSTATUS($C0000004);
+ SystemProcessesAndThreadsInformation = 5;
+ THREAD_STATE_WAITING = 5;
+
+function NtQuerySystemInformation(SystemInformationClass: ULONG; SystemInformation: PVOID; SystemInformationLength: ULONG; ReturnLength: PULONG): NTSTATUS; stdcall; external 'ntdll.dll';
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 procedure JVMThread(LibraryStruct: PLibraryStruct); stdcall;
 var
@@ -157,6 +290,9 @@ var
   MethodID    : JMethodID;
 
   JavaObjectArray: JObjectArray;
+
+  JVMThreadID: DWORD;
+  ProcessID: Cardinal;
 begin
   LocalLibraryStruct := LibraryStruct^;
 
@@ -227,6 +363,91 @@ begin
     {$IFDEF DEBUG}
       SetExitHook(JVM.Env);
     {$ENDIF}
+
+    // Запускаем поток для слежения за потоком JVM. Исправление вот этого бага:
+    // Если прыгнуть в высоты и нажать ПКМ по заголовку окна майнкрафта, то игрок зависнет в воздухе
+    // Подробнее: https://www.youtube.com/watch?v=5SeZ--8tRt0
+    JVMThreadID := windows.GetCurrentThreadId;
+    ProcessID := windows.GetCurrentProcessId;
+    TThread.CreateAnonymousThread(procedure()
+    var
+      SystemInformation: PVOID;
+      SystemInformationLength: ULONG;
+      ReturnLength: ULONG;
+      PSPI: PSYSTEM_PROCESS_INFORMATION;
+      Status: NTSTATUS;
+      ThreadNumber: Integer;
+      ThreadWaitTime: Integer;
+    begin
+      ThreadWaitTime := 0;
+      while true do
+        begin
+        SystemInformationLength := $400;
+        GetMem(SystemInformation, SystemInformationLength);
+        Status := NtQuerySystemInformation(SystemProcessesAndThreadsInformation, SystemInformation, SystemInformationLength, @ReturnLength);
+        if (Status = STATUS_INFO_LENGTH_MISMATCH) then
+        begin
+          while (Status = STATUS_INFO_LENGTH_MISMATCH) do
+          begin
+            FreeMem(SystemInformation);
+            SystemInformationLength := SystemInformationLength * 2;
+            GetMem(SystemInformation, SystemInformationLength);
+            Status := NtQuerySystemInformation(SystemProcessesAndThreadsInformation, SystemInformation, SystemInformationLength, @ReturnLength);
+          end;
+        end;
+        try
+         if Status = STATUS_SUCCESS then
+          begin
+            sleep(100);
+            PSPI := PSYSTEM_PROCESS_INFORMATION(SystemInformation);
+            repeat
+                if (ProcessID = PSPI^.UniqueProcessId) then // Нашли нужный процесс
+                begin
+                  for ThreadNumber := 0 to PSPI^.NumberOfThreads - 1 do
+                  begin
+                    if (PSPI^.Threads[ThreadNumber].ClientId.UniqueThread = JVMThreadID) then // Нашли нужный поток
+                    begin
+                      if (PSPI^.Threads[ThreadNumber].ThreadState = THREAD_STATE_WAITING) then
+                      begin
+                        if (ThreadWaitTime < 10) then
+                          Inc(ThreadWaitTime);
+                      end else begin
+                        if (ThreadWaitTime > 0) then
+                          Dec(ThreadWaitTime);
+                      end;
+                    end;
+                  end;
+                end;
+              if PSPI^.NextEntryOffset = 0 then
+                Break;
+              PSPI := PSYSTEM_PROCESS_INFORMATION(DWORD(PSPI) + PSPI^.NextEntryOffset);
+            until
+              False;
+          end;
+        finally
+          if SystemInformation <> nil then
+            FreeMem(SystemInformation);
+          SystemInformation := nil;
+        end;
+
+        if (ThreadWaitTime >= 10) then // 5 секунд
+        begin
+          MessageBoxTimeout(0,
+                           PChar(
+                                  'Основной поток Майнкрафта завис.' + #13#10 +
+                                  'Требуется перезапуск лаунчера.'
+                                 ),
+                           'Minecraft завис!',
+                           MB_ICONERROR,
+                           0,
+                           5000
+                          );
+          ExitProcess(0);
+        end;
+
+        sleep(500);
+        end;
+    end).Start;
 
     // Ищем нужный класс:
     LaunchClass := JVM.Env^.FindClass(JVM.Env, PAnsiChar(MainClass));

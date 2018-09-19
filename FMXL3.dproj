@@ -6,7 +6,7 @@
         <MainSource>FMXL3.dpr</MainSource>
         <Base>True</Base>
         <Config Condition="'$(Config)'==''">Release</Config>
-        <Platform Condition="'$(Platform)'==''">Win64</Platform>
+        <Platform Condition="'$(Platform)'==''">Win32</Platform>
         <TargetedPlatforms>3</TargetedPlatforms>
         <AppType>Application</AppType>
     </PropertyGroup>
@@ -132,10 +132,10 @@
         <DCC_DebugInformation>0</DCC_DebugInformation>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_2_Win32)'!=''">
+        <AppEnableAdministrator>true</AppEnableAdministrator>
         <VerInfo_Release>1</VerInfo_Release>
         <VerInfo_Keys>CompanyName=FMXL3 Launcher;FileDescription=;FileVersion=3.0.1.0;InternalName=FMXL3;LegalCopyright=FMX Launcher v3;LegalTrademarks=;OriginalFilename=;ProductName=FMX Launcher v3;ProductVersion=3.0.0.0;Comments=</VerInfo_Keys>
         <VerInfo_MajorVer>3</VerInfo_MajorVer>
-        <AppEnableAdministrator>true</AppEnableAdministrator>
         <DCC_ImportedDataReferences>false</DCC_ImportedDataReferences>
         <DCC_IOChecking>false</DCC_IOChecking>
         <Icon_MainIcon>FMXL3_Icon.ico</Icon_MainIcon>
@@ -214,35 +214,16 @@
         <DCCReference Include="HoShiMin's API\CPUIDInfo.pas"/>
         <DCCReference Include="Synapse\ssl_openssl.pas"/>
         <DCCReference Include="Synapse\ssl_openssl_lib.pas"/>
-        <DCCReference Include="AuxUtils\ResUnpacker.pas">
-            <Form>*
-{$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE},
-  HookAPI in &apos;HoShiMin&apos;&apos;s API\HookAPI\HookAPI.pas&apos;,
-  MicroDAsm in &apos;HoShiMin&apos;&apos;s API\HookAPI\MicroDAsm.pas&apos;,
-  SpliceProtection in &apos;HoShiMin&apos;&apos;s API\SpliceProtection.pas&apos;{$ENDIF}
-;
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-{$R *.res}
-{$R Fonts.res}
-{$R DefaultImages.res}
-
-{$IFDEF USE_SSL}
-  {$IFDEF CPUX64}
-    {$R OpenSSL64.res}
-  {$ELSE}
-    {$R OpenSSL32.res}
-  {$ENDIF}
-{$ENDIF}
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-{$WEAKLINKRTTI ON}
-{$RTTI EXPLICIT METHODS([]) PROPERTIES([]) FIELDS([])}
-{$SETPEFLAGS
-  $0001 or (* IMAGE_FILE_RELOCS_STRIPPED         *</Form>
-        </DCCReference>
+        <DCCReference Include="AuxUtils\ResUnpacker.pas"/>
+        <DCCReference Include="Avanguard\AvnApi.pas"/>
+        <DCCReference Include="DEC\CPU.pas"/>
+        <DCCReference Include="DEC\CRC.pas"/>
+        <DCCReference Include="DEC\DECCipher.pas"/>
+        <DCCReference Include="DEC\DECData.pas"/>
+        <DCCReference Include="DEC\DECFmt.pas"/>
+        <DCCReference Include="DEC\DECHash.pas"/>
+        <DCCReference Include="DEC\DECRandom.pas"/>
+        <DCCReference Include="DEC\DECUtil.pas"/>
         <None Include="Definitions.inc"/>
         <None Include="HoShiMin's API\HookAPI\MicroDAsmTables.inc"/>
         <BuildConfiguration Include="Release">
@@ -296,12 +277,6 @@
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
-                <DeployFile LocalName="Win64\Debug\FMXL3.rsm" Configuration="Debug" Class="DebugSymbols">
-                    <Platform Name="Win64">
-                        <RemoteName>FMXL3.rsm</RemoteName>
-                        <Overwrite>true</Overwrite>
-                    </Platform>
-                </DeployFile>
                 <DeployFile LocalName="HoShiMin's API\HookAPI\MicroDAsmTables.inc" Configuration="Debug" Class="ProjectFile">
                     <Platform Name="Win64">
                         <RemoteDir>.\</RemoteDir>
@@ -315,6 +290,12 @@
                 </DeployFile>
                 <DeployFile LocalName="$(BDS)\Redist\iossimulator\libcgunwind.1.0.dylib" Class="DependencyModule">
                     <Platform Name="iOSSimulator">
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="HoShiMin's API\HookAPI\MicroDAsmTables.inc" Configuration="Debug" Class="ProjectFile">
+                    <Platform Name="Win32">
+                        <RemoteDir>.\</RemoteDir>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
@@ -336,27 +317,12 @@
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>
-                <DeployClass Name="DependencyModule">
-                    <Platform Name="Win32">
-                        <Operation>0</Operation>
-                        <Extensions>.dll;.bpl</Extensions>
-                    </Platform>
+                <DeployClass Name="ProjectiOSDeviceResourceRules">
                     <Platform Name="iOSDevice64">
                         <Operation>1</Operation>
-                        <Extensions>.dylib</Extensions>
-                    </Platform>
-                    <Platform Name="OSX32">
-                        <RemoteDir>Contents\MacOS</RemoteDir>
-                        <Operation>1</Operation>
-                        <Extensions>.dylib</Extensions>
                     </Platform>
                     <Platform Name="iOSDevice32">
                         <Operation>1</Operation>
-                        <Extensions>.dylib</Extensions>
-                    </Platform>
-                    <Platform Name="iOSSimulator">
-                        <Operation>1</Operation>
-                        <Extensions>.dylib</Extensions>
                     </Platform>
                 </DeployClass>
                 <DeployClass Name="ProjectOSXResource">
@@ -710,12 +676,27 @@
                         <Operation>1</Operation>
                     </Platform>
                 </DeployClass>
-                <DeployClass Name="ProjectiOSDeviceResourceRules">
+                <DeployClass Name="DependencyModule">
+                    <Platform Name="Win32">
+                        <Operation>0</Operation>
+                        <Extensions>.dll;.bpl</Extensions>
+                    </Platform>
                     <Platform Name="iOSDevice64">
                         <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="OSX32">
+                        <RemoteDir>Contents\MacOS</RemoteDir>
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
                     </Platform>
                     <Platform Name="iOSDevice32">
                         <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
+                    </Platform>
+                    <Platform Name="iOSSimulator">
+                        <Operation>1</Operation>
+                        <Extensions>.dylib</Extensions>
                     </Platform>
                 </DeployClass>
                 <ProjectRoot Platform="iOSDevice64" Name="$(PROJECTNAME).app"/>

@@ -8,7 +8,7 @@ uses
   CodepageAPI, StringsAPI, FileAPI, JSONUtils, TimeManagement,
   DownloadHelper, HTTPUtils, HTTPMultiLoader,
   JavaInformation, UserInformation, FilesValidation, JNIWrapper, ServerQuery,
-  AuxUtils, CPUIDInfo;
+  AuxUtils, CPUIDInfo{, AvnApi};
 
 type
   TClientInfo = TJSONObject;
@@ -407,6 +407,22 @@ begin
   SetDllDirectory(PChar(ExtractFileDir(ExtractFileDir(FixSlashes(JVMPath)))));
   DeleteDirectory(WorkingFolder + '\assets\skins', True);
 
+  {
+  // Подождём несколько секунд пока JAVA пропатчит сама себя
+  TThread.CreateAnonymousThread(procedure()
+  var
+    AvnApi: PAvnApi;
+    hAvn: HMODULE;
+  begin
+    hAvn := LoadLibrary('Avanguard.dll');
+    AvnApi := PPAvnApi(GetProcAddress(hAvn, 'Stub'))^;
+    AvnApi.AvnLock();
+    sleep(3000);
+    //AvnApi.RehashModule();
+    AvnApi.AvnUnlock();
+  end).Start;
+  }
+
   // Запускаем игру:
   Result := LaunchJavaApplet(
                               JVMPath,
@@ -415,6 +431,7 @@ begin
                               ReplaceParam(FServerInfo.MainClass, '.', '/'),
                               Arguments
                              );
+
 end;
 
 procedure TMinecraftLauncher.Clear;

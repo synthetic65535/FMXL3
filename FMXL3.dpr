@@ -57,12 +57,18 @@ uses
   CPUIDInfo in 'HoShiMin''s API\CPUIDInfo.pas',
   ssl_openssl in 'Synapse\ssl_openssl.pas',
   ssl_openssl_lib in 'Synapse\ssl_openssl_lib.pas',
-  ResUnpacker in 'AuxUtils\ResUnpacker.pas'
-{$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE},
-  HookAPI in 'HoShiMin''s API\HookAPI\HookAPI.pas',
-  MicroDAsm in 'HoShiMin''s API\HookAPI\MicroDAsm.pas',
-  SpliceProtection in 'HoShiMin''s API\SpliceProtection.pas'
+  ResUnpacker in 'AuxUtils\ResUnpacker.pas',
+{$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE}
+  AvnApi in 'Avanguard\AvnApi.pas',
 {$ENDIF}
+  CPU in 'DEC\CPU.pas',
+  CRC in 'DEC\CRC.pas',
+  DECCipher in 'DEC\DECCipher.pas',
+  DECData in 'DEC\DECData.pas',
+  DECFmt in 'DEC\DECFmt.pas',
+  DECHash in 'DEC\DECHash.pas',
+  DECRandom in 'DEC\DECRandom.pas',
+  DECUtil in 'DEC\DECUtil.pas'
 ;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -76,6 +82,14 @@ uses
     {$R OpenSSL64.res}
   {$ELSE}
     {$R OpenSSL32.res}
+  {$ENDIF}
+{$ENDIF}
+
+{$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE}
+  {$IFDEF CPUX64}
+    {$R Avanguard64.res}
+  {$ELSE}
+    {$R Avanguard32.res}
   {$ENDIF}
 {$ENDIF}
 

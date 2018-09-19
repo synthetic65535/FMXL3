@@ -13,3 +13,4 @@ rd /q /s LauncherAPI\FilesValidation\__history
 rd /q /s LauncherAPI\FilesValidation\__recovery
 rd /q /s AuxUtils\__history
 rd /q /s AuxUtils\__recovery
+rd /q /s Avanguard\__history

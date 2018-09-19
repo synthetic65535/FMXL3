@@ -15,6 +15,7 @@
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 //{$DEFINE ENABLE_EXECUTABLE_MEMORY_DEFENCE} // Защита от инъекций
+{$DEFINE ENABLE_CHEATENGINE_DETECTION) // Проверка на наличие CheatEngine
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 

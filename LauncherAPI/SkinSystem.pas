@@ -4,7 +4,8 @@ interface
 
 uses
   SysUtils, UserInformation, HTTPUtils, System.JSON, CodepageAPI,
-  JSONUtils, MultipartPostRequest, Classes, System.NetEncoding;
+  JSONUtils, MultipartPostRequest, Classes, System.NetEncoding, Encryption,
+  LauncherSettings;
 
 type
   IMAGE_TYPE = (
@@ -32,7 +33,7 @@ type
       PNGSignature: Cardinal = $474E5089;
     private
       FErrorReason: string;
-      function ParseResponse(const Response: TStringStream; const ImageStream: TMemoryStream = nil): SKIN_SYSTEM_STATUS;
+      function ParseResponse(Response: TStringStream; const ImageStream: TMemoryStream = nil): SKIN_SYSTEM_STATUS;
     public
       property ErrorReason: string read FErrorReason;
 
@@ -62,13 +63,17 @@ begin
   inherited;
 end;
 
-function TSkinSystemWrapper.ParseResponse(const Response: TStringStream; const ImageStream: TMemoryStream = nil): SKIN_SYSTEM_STATUS;
+function TSkinSystemWrapper.ParseResponse(Response: TStringStream; const ImageStream: TMemoryStream = nil): SKIN_SYSTEM_STATUS;
 var
   ResponseJSON: TJSONObject;
   Status: string;
   ImageBase64: string;
   ImageBase64Stream: TStringStream;
+  TempDataLength: Cardinal;
 begin
+  TempDataLength := Response.Size;
+  DecryptRijndael(Response.Memory, TempDataLength, GetEncryptionKey());
+  Response.Size := TempDataLength;
   UTF8Convert(Response);
 
   ResponseJSON := JSONStringToJSONObject(Response.DataString);
@@ -113,6 +118,7 @@ var
   HTTPSender: THTTPSender;
   Request: TMultipartPostRequest;
   Response: TStringStream;
+  EncryptedLogin, EncryptedPassword: AnsiString;
 begin
   if not FileExists(FileName) then
   begin
@@ -129,9 +135,14 @@ begin
     Exit(SKIN_SYSTEM_NOT_PNG);
   end;
 
+  EncryptedLogin := Login;
+  EncryptedPassword := Password;
+  EncryptRijndael(EncryptedLogin, GetEncryptionKey());
+  EncryptRijndael(EncryptedPassword, GetEncryptionKey());
+
   Request := TMultipartPostRequest.Create;
-  Request.AddTextField('login'     , Login);
-  Request.AddTextField('password'  , Password);
+  Request.AddTextField('login'     , HexEncode(EncryptedLogin));
+  Request.AddTextField('password'  , HexEncode(EncryptedPassword));
   Request.AddTextField('action'    , 'setup');
   Request.AddTextField('image_type', ImageTypes[Integer(ImageType)]);
   Request.AddFileField(ImageStream , 'image', Login + '.png', 'image/png');
@@ -169,14 +180,20 @@ var
   HTTPSender: THTTPSender;
   Response: TStringStream;
   ImageStream: TMemoryStream;
+  EncryptedLogin, EncryptedPassword: AnsiString;
 begin
   Response := TStringStream.Create;
   Response.Clear;
 
+  EncryptedLogin := Login;
+  EncryptedPassword := Password;
+  EncryptRijndael(EncryptedLogin, GetEncryptionKey());
+  EncryptRijndael(EncryptedPassword, GetEncryptionKey());
+
   HTTPSender := THTTPSender.Create;
   if not HTTPSender.POST(
                           SkinSystemScriptAddress,
-                          'login=' + Login + '&password=' + Password + '&action=delete&image_type=' + ImageTypes[Integer(ImageType)],
+                          'login=' + HexEncode(EncryptedLogin) + '&password=' + HexEncode(EncryptedPassword) + '&action=delete&image_type=' + ImageTypes[Integer(ImageType)],
                           Response
                          ) then
   begin
@@ -229,14 +246,20 @@ var
   HTTPSender: THTTPSender;
   Response: TStringStream;
   ImageStream: TMemoryStream;
+  EncryptedLogin, EncryptedPassword: AnsiString;
 begin
   Response := TStringStream.Create;
   Response.Clear;
 
+  EncryptedLogin := Login;
+  EncryptedPassword := Password;
+  EncryptRijndael(EncryptedLogin, GetEncryptionKey());
+  EncryptRijndael(EncryptedPassword, GetEncryptionKey());
+
   HTTPSender := THTTPSender.Create;
   if not HTTPSender.POST(
                           SkinSystemScriptAddress,
-                          'login=' + Login + '&password=' + Password + '&action=download&image_type=' + ImageTypes[Integer(ImageType)],
+                          'login=' + HexEncode(EncryptedLogin) + '&password=' + HexEncode(EncryptedPassword) + '&action=download&image_type=' + ImageTypes[Integer(ImageType)],
                           Response
                          ) then
   begin
@@ -245,11 +268,11 @@ begin
     FErrorReason := 'Не удалось выполнить запрос! Проверьте доступность адреса!';
     Exit(SKIN_SYSTEM_CONNECTION_ERROR);
   end;
-
   FreeAndNil(HTTPSender);
 
   ImageStream := TMemoryStream.Create;
   ImageStream.Clear;
+
   Result := ParseResponse(Response, ImageStream);
   FreeAndNil(Response);
 

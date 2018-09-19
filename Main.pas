@@ -28,6 +28,11 @@ uses
   // Synapse/OpenSSL:
   blcksock, ssl_openssl, ssl_openssl_lib,
 
+  // Avanguard
+  {$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE}
+  AvnApi,
+  {$ENDIF}
+
   // AUX Modules:
   LauncherSettings, PopupManager, ServerPanel, StackCapacitor, ResUnpacker,
   System.ImageList, FMX.ImgList;
@@ -259,6 +264,10 @@ type
     FCPUStack, FRAMStack: TStackCapacitor<Single>;
     FLastCPUTimes: TThread.TSystemTimes;
     LastServer: String;
+    {$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE}
+    AvnApi: PAvnApi;
+    hAvn: HMODULE;
+    {$ENDIF}
     function ShowOpenDialog(out SelectedPath: string; const Mask: string = ''): Boolean;
     function ShowSaveDialog(out SelectedPath: string; const Mask: string = ''; const InitialFileName: string = ''): Boolean;
     procedure SwitchTab(DesiredTab: TABS);
@@ -274,12 +283,11 @@ type
     procedure LaunchClient(ClientNumber: Integer);
     procedure SaveSettings(AutoLogin, ExternalJava: Boolean);
     procedure LoadSettings;
-    function EncryptPassword3(const Password: string): string;
-    function DecryptPassword3(const PasswordBase64: string): string;
-    function DecryptPassword2(const PasswordBase64: string): string;
-    function DecryptPassword1(const PasswordBase64: string): string;
+    function EncryptPassword6(const Password: AnsiString): AnsiString;
+    function DecryptPassword6(const PasswordBase64: AnsiString): AnsiString;
   public
     ComplexHwid: String;
+    AuthToken: String;
   end;
 
 var
@@ -290,49 +298,26 @@ implementation
 
 {$R *.fmx}
 
+
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
-function TMainForm.EncryptPassword3(const Password: string): string;
+function TMainForm.EncryptPassword6(const Password: AnsiString): AnsiString;
 begin
   Result := Password;
-  EncryptDecryptVerrnam(Result, PAnsiChar(ComplexHwid), Length(ComplexHwid));
+  EncryptRijndael(Result, GetPasswordKey() + ComplexHwid);
+  // Зависимость от ComplexHwid позволяет привязать защифрованный пароль к оборудованию компьютера.
+  // Злоумышленник не сможет просто скопипастить себе в реестр чужую запись и использовать пароль.
   Result := TNetEncoding.Base64.Encode(Result);
 end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-function TMainForm.DecryptPassword2(const PasswordBase64: string): string;
+function TMainForm.DecryptPassword6(const PasswordBase64: AnsiString): AnsiString;
 begin
   Result := PasswordBase64;
   try
     Result := TNetEncoding.Base64.Decode(Result);
-    EncryptDecryptVerrnam(Result, PAnsiChar('COM' + ComplexHwid), Length('COM' + ComplexHwid));
-  except
-    Result := '';
-  end;
-end;
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-function TMainForm.DecryptPassword3(const PasswordBase64: string): string;
-begin
-  Result := PasswordBase64;
-  try
-    Result := TNetEncoding.Base64.Decode(Result);
-    EncryptDecryptVerrnam(Result, PAnsiChar(ComplexHwid), Length(ComplexHwid));
-  except
-    Result := '';
-  end;
-end;
-
-// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-function TMainForm.DecryptPassword1(const PasswordBase64: string): string;
-begin
-  Result := PasswordBase64;
-  try
-    Result := TNetEncoding.Base64.Decode(Result);
-    EncryptDecryptVerrnam(Result, PAnsiChar(PasswordKey), Length(PasswordKey));
+    DecryptRijndael(Result, GetPasswordKey() + ComplexHwid);
   except
     Result := '';
   end;
@@ -601,11 +586,13 @@ begin
   SaveStringToRegistry(RegistryPath, 'Login', LoginEdit.Text);
 
   if AutoLogin then
-    SaveStringToRegistry(RegistryPath, 'Password', EncryptPassword3(PasswordEdit.Text))
-  else
-    SaveStringToRegistry(RegistryPath, 'Password', '');
-
-  SaveNumberToRegistry(RegistryPath, 'PasswordEncryptionVersion', 3);
+    begin
+      SaveStringToRegistry(RegistryPath, 'Password', EncryptPassword6(PasswordEdit.Text));
+      SaveNumberToRegistry(RegistryPath, 'PasswordEncryptionVersion', 6);
+    end else
+      begin
+      SaveStringToRegistry(RegistryPath, 'Password', '');
+      end;
 
   if ExternalJava then
   begin
@@ -644,13 +631,13 @@ begin
   GetCurrentJavaInfo(JavaHome, LibPath, JavaVersion);
   JavaVersion := GetJavaLowVersion(JavaVersion);
 
-  LoginEdit.Text    := ReadStringFromRegistry(RegistryPath, 'Login'   , LoginEdit.Text);
-  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 1 then
-    PasswordEdit.Text := DecryptPassword1(ReadStringFromRegistry(RegistryPath, 'Password', ''));
-  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 2 then
-    PasswordEdit.Text := DecryptPassword2(ReadStringFromRegistry(RegistryPath, 'Password', ''));
-  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 3 then
-    PasswordEdit.Text := DecryptPassword3(ReadStringFromRegistry(RegistryPath, 'Password', ''));
+  LoginEdit.Text := ReadStringFromRegistry(RegistryPath, 'Login', LoginEdit.Text);
+
+  if ReadNumberFromRegistry(RegistryPath, 'PasswordEncryptionVersion', 1) = 6 then
+    PasswordEdit.Text := DecryptPassword6(ReadStringFromRegistry(RegistryPath, 'Password', ''))
+  else
+    PasswordEdit.Text := '';
+
   {$IFDEF CPUX64}
     RAMEdit.Text         := ReadStringFromRegistry(RegistryPath, 'RAM64'        , RAMEdit.Text);
     JavaVersionEdit.Text := ReadStringFromRegistry(RegistryPath, 'JavaVersion64', JavaVersion);
@@ -775,9 +762,8 @@ begin
   SwitchTab(GAME_TAB);
 end;
 
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-
-
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
@@ -816,24 +802,40 @@ begin
 }
   // Создаём объект FLauncherAPI:
   FLauncherAPI := TLauncherAPI.Create(WorkingFolderEdit.Text, ServerWorkingFolder, ServerWorkingFolderDownload);
-  FLauncherAPI.EncryptionKey := EncryptionKey;
+  FLauncherAPI.EncryptionKey := GetEncryptionKey();
   FLauncherAPI.LauncherInfo.LauncherVersion := LauncherVersion;
 
   // Распаковываем необходимые ресурсы:
   {$IFDEF USE_SSL}
     {$IFDEF CPUX64}
-      UnpackRes('LIBEAY64', FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x64\libeay32.dll');
-      UnpackRes('SSLEAY64', FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x64\ssleay32.dll');
-      SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x64\'));
+      UnpackRes('LIBEAY64', FLauncherAPI.LocalWorkingFolder + '\Libraries\x64\libeay32.dll');
+      UnpackRes('SSLEAY64', FLauncherAPI.LocalWorkingFolder + '\Libraries\x64\ssleay32.dll');
+      SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\Libraries\x64\'));
     {$ELSE}
-      UnpackRes('LIBEAY32', FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x32\libeay32.dll');
-      UnpackRes('SSLEAY32', FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x32\ssleay32.dll');
-      SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\OpenSSL\x32\'));
+      UnpackRes('LIBEAY32', FLauncherAPI.LocalWorkingFolder + '\Libraries\x32\libeay32.dll');
+      UnpackRes('SSLEAY32', FLauncherAPI.LocalWorkingFolder + '\Libraries\x32\ssleay32.dll');
+      SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\Libraries\x32\'));
     {$ENDIF}
 
     if InitSSLInterface then
       SSLImplementation := TSSLOpenSSL;
   {$ENDIF}
+
+  {$IFDEF ENABLE_EXECUTABLE_MEMORY_DEFENCE}
+    //{$IFDEF CPUX64}
+    //  UnpackRes('AVANGUARD64', FLauncherAPI.LocalWorkingFolder + '\Libraries\x64\Avanguard.dll');
+    //  SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\Libraries\x64\'));
+    //{$ELSE}
+    //  UnpackRes('AVANGUARD32', FLauncherAPI.LocalWorkingFolder + '\Libraries\x32\Avanguard.dll');
+    //  SetDllDirectory(PChar(FLauncherAPI.LocalWorkingFolder + '\Libraries\x32\'));
+    //{$ENDIF}
+
+    hAvn := LoadLibrary('Avanguard.dll');
+    AvnApi := PPAvnApi(GetProcAddress(hAvn, 'Stub'))^;
+    AvnApi.AvnStart;
+  {$ENDIF}
+
+  Randomize;
 
   if FIsAutoLogin then
     AuthButton.OnClick(Self);
@@ -885,6 +887,9 @@ end;
 
 procedure TMainForm.AuthButtonClick(Sender: TObject);
 begin
+// Раскомментировать для получения ключа к веб-части
+//InputBox('Ключ шифрования','Ключ:',GetEncryptionKey());
+
   SetAuthTabActiveState(False);
   if not FIsRegPanel then
   begin
@@ -927,6 +932,34 @@ end;
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+// https://www.delphipraxis.net/99480-vmware-virtualpc-virtualbox-etc-detection-2.html
+// Работает плохо
+{
+function RedPill(): Boolean;
+
+function GetSIDTBaseAddress: DWORD; assembler;
+asm
+  sub esp, 8
+  sidt qword ptr [esp]
+  mov eax, dword ptr [esp+2]
+  add esp, 8
+end;
+
+var
+  SIDT: DWORD;
+begin
+  Result := false;
+  SIDT := GetSIDTBaseAddress;
+  sdt := SIDT;
+
+  if (SIDT >= $0D0000000) then
+  begin
+    Result := true;
+  end;
+end;
+}
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
 procedure TMainForm.OnSuccessfulAuth;
 var
   ServerPanelSample: TServerPanel.TServerPanelSample;
@@ -960,7 +993,13 @@ begin
       ExitProcess(0);
     end;
   end;
-
+  {
+  if RedPill() then // Работает плохо
+  begin
+    ShowErrorMessage('Играть на виртуальной машине запрещено!' + #13 + #10 + inttohex(sdt,16));
+    ExitProcess(0);
+  end;
+  }
   FSelectedClientNumber       := -1;
   FSelectedToPlayClientNumber := -1;
 
@@ -1127,7 +1166,9 @@ end;
 //                   Проверка, обновление и запуск клиента
 //HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 
+{$IFDEF ENABLE_CHEATENGINE_DETECTION}
 
+// Проверка: встречается ли в памяти какой-либо программы многократно "Cheat Engine"
 function CheatEngineLaunchedMem(): boolean;
 
 const
@@ -1229,8 +1270,7 @@ if Assigned(PidProcesses) then
   end;
 end;
 
-
-
+// Проверка: запущено ли окно CheatEngine
 function CheatEngineLaunchedWin(): boolean;
 
 var IsLaunched: boolean;
@@ -1246,15 +1286,14 @@ if (pos('Cheat Engine', CapStr) > 0) then
   IsLaunched := true;
 end;
 
-
 begin
 IsLaunched := false;
 EnumWindows(@EnWndCallBack,0);
 Result := IsLaunched;
 end;
 
-// Комбинированная защита от читеров
-procedure AntiCheatThread();
+// Проверка на наличие CheatEngine
+procedure AntiCheatCheck();
 var
   a,b,c:integer;
   ver: string;
@@ -1262,47 +1301,50 @@ var
   CELaunchedMem: boolean;
   CELaunchedWin: boolean;
 begin
+try
+  CELauncherFw := false;
+  for a:=1 to 7 do
+    for b:=-1 to 9 do
+      for c:=-1 to 3 do
+        if not((c=0) or (a < 5) and (c >= 0)) then
+          begin
+          ver := inttostr(a);
+          if (b>=0) then ver := ver + '.' + inttostr(b);
+          if (c>=0) then ver := ver + '.' + inttostr(c);
+          if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
+            CELauncherFw := true;
+          end;
+  CELaunchedMem := CheatEngineLaunchedMem();
+  CELaunchedWin := CheatEngineLaunchedWin();
+  except
+  end;
+
+  if (CELauncherFw or CELaunchedMem or CELaunchedWin) then
+    begin
+    MessageBoxTimeout(0,
+                     PChar(
+                            'Обнаружен Cheat Engine.' + #13#10 +
+                            'Пожалуйста, удалите Cheat Engine с компьютера.'
+                           ),
+                     'Обнаружен чит!',
+                     MB_ICONERROR,
+                     0,
+                     5000
+                    );
+    ExitProcess(0);
+    end;
+end;
+
+// Поток для слежения за CheatEngine
+procedure AntiCheatThread();
+begin
   while (true) do
     begin
-    try
-    CELaunchedMem := false;
-    for a:=1 to 7 do
-      for b:=-1 to 9 do
-        for c:=-1 to 3 do
-          if not((c=0) or (a < 5) and (c >= 0)) then
-            begin
-            ver := inttostr(a);
-            if (b>=0) then ver := ver + '.' + inttostr(b);
-            if (c>=0) then ver := ver + '.' + inttostr(c);
-            if Windows.FindWindow(nil,pchar('Cheat Engine ' + ver)) <> 0 then
-              CELaunchedMem := true;
-            end;
-
-    CELaunchedMem := CheatEngineLaunchedMem();
-    CELaunchedWin := CheatEngineLaunchedWin();
-    except
-    end;
-
-    if (CELauncherFw or CELaunchedMem or CELaunchedWin) then
-      begin
-      MessageBoxTimeout(0,
-                       PChar(
-                              'Обнаружен Cheat Engine.' + #13#10 +
-                              'Пожалуйста, удалите Cheat Engine с компьютера.'
-                             ),
-                       'Обнаружен чит!',
-                       MB_ICONERROR,
-                       0,
-                       5000
-                      );
-      ExitProcess(0);
-      end;
-
-
+    AntiCheatCheck();
     sleep(120000);
     end;
-
 end;
+{$ENDIF}
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
@@ -1372,8 +1414,10 @@ begin
     SetEnvironmentVariable('JAVA_TOOL_OPTIONS', '');
   {$ENDIF}
 
+  {$IFDEF ENABLE_CHEATENGINE_DETECTION}
   // Запускаем поток проверки на наличие читов
   TThread.CreateAnonymousThread(AntiCheatThread).Start;
+  {$ENDIF}
 
   // Запускаем игру:
   Status := FLauncherAPI.LaunchClient(
