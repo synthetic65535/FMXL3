@@ -409,8 +409,14 @@ begin
                     begin
                       if (PSPI^.Threads[ThreadNumber].ThreadState = THREAD_STATE_WAITING) then
                       begin
-                        if (ThreadWaitTime < 10) then
-                          Inc(ThreadWaitTime);
+                        if (PSPI^.Threads[ThreadNumber].WaitReason = WrUserRequest) then
+                        begin
+                          if (ThreadWaitTime < 10) then
+                            Inc(ThreadWaitTime);
+                        end else begin
+                          if (ThreadWaitTime > 0) then
+                            Dec(ThreadWaitTime);
+                        end;
                       end else begin
                         if (ThreadWaitTime > 0) then
                           Dec(ThreadWaitTime);
